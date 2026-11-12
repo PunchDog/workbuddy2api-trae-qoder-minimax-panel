@@ -52,7 +52,7 @@ func (p *Panel) qoderRelogin(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if strings.EqualFold(strings.TrimSpace(a.Email), email) ||
-			(a.Auth != nil && strings.EqualFold(strings.TrimSpace(a.Auth.User.Email), email)) {
+			(a.Auth != nil && strings.EqualFold(ideauth.QoderAuthKey(a.Auth), email)) {
 			found = true
 			break
 		}
@@ -90,7 +90,7 @@ func (p *Panel) qoderRelogin(w http.ResponseWriter, r *http.Request) {
 	qoderLoginSession.mu.Lock()
 	before := ""
 	if a, err := ideauth.ReadQoderAuth(); err == nil {
-		before = strings.TrimSpace(a.User.Email)
+		before = strings.TrimSpace(ideauth.QoderAuthKey(a))
 	}
 	qoderLoginSession.before = before
 	qoderLoginSession.startedAt = time.Now()

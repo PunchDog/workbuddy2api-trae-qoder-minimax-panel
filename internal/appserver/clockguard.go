@@ -40,6 +40,7 @@ const (
 // 喊"你的钟坏了"。401/404 也照用 —— Date 头跟业务码无关。
 var clockSkewSources = []string{
 	"https://openapi.qoder.sh/sash/api/v1/me/campaigns",
+	"https://openapi.qoder.com.cn/sash/api/v1/me/campaigns",
 	"https://auth.huaweicloud.com/authui/login.html",
 	"https://www.cloudflare.com/cdn-cgi/trace",
 }

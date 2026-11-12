@@ -47,6 +47,7 @@ const qoderLoginTTL = 20 * time.Minute
 var qoderLoginSession struct {
 	mu        sync.Mutex
 	before    string // 开始时的登录账号（空 = 当时未登录）
+	realm     string // 本次登录针对的客户端版本（cn/intl，空 = 自动探测）
 	startedAt time.Time
 	done      bool
 	ok        bool
@@ -59,19 +60,23 @@ var qoderLoginSession struct {
 
 // qoderLoginStart 启动 Qoder 客户端，开始等待登录完成。
 //
-// body: {"logout":true} —— 先退出当前账号（备份登录态），让客户端回到登录页。
+// body: {"logout":true,"realm":"cn|intl"} —— logout 先退出当前账号（备份登录态），
+// 让客户端回到登录页；realm 指定盯哪个版本的客户端（缺省自动探测）。
 func (p *Panel) qoderLoginStart(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Logout bool `json:"logout"`
+		Logout bool   `json:"logout"`
+		Realm  string `json:"realm"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
+	realm := strings.TrimSpace(req.Realm)
 
 	qoderLoginSession.mu.Lock()
 	if qoderLoginSession.startedAt.IsZero() || qoderLoginSession.done {
 		qoderLoginSession.before = ""
-		if a, err := ideauth.ReadQoderAuth(); err == nil {
-			qoderLoginSession.before = strings.TrimSpace(a.User.Email)
+		if a, err := ideauth.ReadQoderAuthForRealm(realm); err == nil {
+			qoderLoginSession.before = strings.TrimSpace(ideauth.QoderAuthKey(a))
 		}
+		qoderLoginSession.realm = realm
 		qoderLoginSession.startedAt = time.Now()
 		qoderLoginSession.done = false
 		qoderLoginSession.ok = false
@@ -80,10 +85,12 @@ func (p *Panel) qoderLoginStart(w http.ResponseWriter, r *http.Request) {
 		qoderLoginSession.independent = false
 		qoderLoginSession.detail = ""
 	}
+	// 会话已在进行时沿用它的 realm（本次请求传的 realm 不生效，避免盯错目录）。
+	realm = qoderLoginSession.realm
 	qoderLoginSession.mu.Unlock()
 
 	if req.Logout {
-		if note, err := qoderLogoutClient(); err != nil {
+		if note, err := qoderLogoutClientForRealm(realm); err != nil {
 			writeErr(w, http.StatusBadGateway, "退出当前账号失败: "+err.Error())
 			return
 		} else {
@@ -97,14 +104,31 @@ func (p *Panel) qoderLoginStart(w http.ResponseWriter, r *http.Request) {
 	} else {
 		note = ideauth.LaunchClient("qoder")
 	}
-	log.Printf("panel: Qoder 浏览器登录：等待客户端登录完成（%s）", note)
+	log.Printf("panel: Qoder 浏览器登录：等待客户端登录完成（%s，realm=%s）", note, firstNonEmpty(realm, "auto"))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "running": true, "note": note,
-		"message": "已启动 Qoder 客户端 —— 请在客户端里点「浏览器登录 / 扫码登录」完成鉴权，登录成功后面板自动收录这个号",
+		"message": "已启动 Qoder 客户端（" + qoderRealmLabel(realm) + "）—— 请在客户端里点「浏览器登录 / 扫码登录」完成鉴权，登录成功后面板自动收录这个号",
 	})
 }
 
-// qoderLogoutClient 退出客户端当前账号，让客户端回到登录页。
+// qoderRealmLabel realm 的中文显示名（空 = 自动探测）。
+func qoderRealmLabel(realm string) string {
+	switch realm {
+	case ideauth.QoderRealmCN:
+		return "国内版"
+	case ideauth.QoderRealmINTL:
+		return "国际版"
+	default:
+		return "自动探测版本"
+	}
+}
+
+// qoderLogoutClient 退出客户端当前账号（自动探测目录），让客户端回到登录页。
+func qoderLogoutClient() (string, error) {
+	return qoderLogoutClientForRealm("")
+}
+
+// qoderLogoutClientForRealm 退出指定版本客户端的当前账号。
 //
 // 三个坑（都踩过）：
 //  1. **必须先结束客户端**：它退出时会把内存里的登录态写回 auth.v1.dat，
@@ -113,13 +137,13 @@ func (p *Panel) qoderLoginStart(w http.ResponseWriter, r *http.Request) {
 //     报 "body too short: 0"，面板和客户端都读不了这个文件。正确做法是**删掉它**
 //     （= 全新安装的状态），客户端启动自然回到登录界面。
 //  3. **只备份有效的登录态**：坏文件再备份一遍只会攒一串垃圾。
-func qoderLogoutClient() (string, error) {
+func qoderLogoutClientForRealm(realm string) (string, error) {
 	// 1) 先结束客户端（它退出时可能把登录态写回来）。
 	if ideauth.ClientRunning("qoder") {
 		_ = ideauth.KillClient("qoder")
 		time.Sleep(2 * time.Second)
 	}
-	return qoderClearAuthFile(ideauth.QoderDataDir())
+	return qoderClearAuthFile(ideauth.QoderCaptureDir(realm))
 }
 
 // qoderClearAuthFile 清掉（并按需备份）Qoder 的登录态文件。
@@ -129,9 +153,10 @@ func qoderClearAuthFile(dir string) (string, error) {
 	authPath := filepath.Join(dir, "auth.v1.dat")
 
 	// 只在当前登录态**有效**时备份一份（坏文件再备份一遍只会攒垃圾）。
+	// 校验必须用**同一个目录**的 key 解密（国内/国际版 Local State 不通用）。
 	note := "已退出当前账号"
 	if raw, err := os.ReadFile(authPath); err == nil {
-		if _, derr := ideauth.ReadQoderAuth(); derr == nil {
+		if _, derr := ideauth.ReadQoderAuthInDir(dir); derr == nil {
 			bakDir := ideauth.PoolDir()
 			if err := os.MkdirAll(bakDir, 0o700); err == nil {
 				bak := filepath.Join(bakDir, "qoder_auth_backup_"+time.Now().Format("20060102-150405")+".dat")
@@ -181,14 +206,15 @@ func (p *Panel) qoderLoginPoll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	before := qoderLoginSession.before
+	realm := qoderLoginSession.realm
 	qoderLoginSession.mu.Unlock()
 
-	a, err := ideauth.ReadQoderAuth()
+	a, err := ideauth.ReadQoderAuthForRealm(realm)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"done": false, "message": "等待 Qoder 客户端完成登录…"})
 		return
 	}
-	email := strings.TrimSpace(a.User.Email)
+	email := strings.TrimSpace(ideauth.QoderAuthKey(a))
 	if email == "" {
 		writeJSON(w, http.StatusOK, map[string]any{"done": false, "message": "等待 Qoder 客户端完成登录…"})
 		return
@@ -201,7 +227,7 @@ func (p *Panel) qoderLoginPoll(w http.ResponseWriter, r *http.Request) {
 		// 正确判据看**登录态文件是否被重写**：auth.v1.dat 的 mtime 晚于本次
 		// 开始时间，说明刚刚确实走了一次新的登录，直接收号。
 		mtime := time.Time{}
-		if st, serr := os.Stat(filepath.Join(ideauth.QoderDataDir(), "auth.v1.dat")); serr == nil {
+		if st, serr := os.Stat(filepath.Join(ideauth.QoderCaptureDir(realm), "auth.v1.dat")); serr == nil {
 			mtime = st.ModTime()
 		}
 		qoderLoginSession.mu.Lock()
@@ -213,7 +239,7 @@ func (p *Panel) qoderLoginPoll(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	_, added, err := ideauth.UpsertQoderAccount()
+	_, added, err := ideauth.UpsertQoderAccountForRealm(realm)
 	verb := "已添加"
 	if err == nil && !added {
 		verb = "已更新"

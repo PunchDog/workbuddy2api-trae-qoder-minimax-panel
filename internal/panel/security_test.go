@@ -3,6 +3,7 @@ package panel
 import (
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -64,13 +65,14 @@ func TestCSPDisallowsInlineScriptAndFraming(t *testing.T) {
 }
 
 // 页面必须引用外部脚本（内联脚本会被上面的 CSP 拦掉，页面将完全不可用）。
+// 允许 ?v=构建指纹 查询串（缓存治理，见 index.go）——同源外部脚本的 CSP 语义不变。
 func TestIndexReferencesExternalScript(t *testing.T) {
 	p := newTestPanel()
 	rec := httptest.NewRecorder()
 	p.ServeHTTP(rec, httptest.NewRequest("GET", "/panel/", nil))
 	body := rec.Body.String()
 
-	if !strings.Contains(body, `<script src="app.js"></script>`) {
+	if !regexp.MustCompile(`<script src="app\.js(\?v=[a-f0-9]+)?"></script>`).MatchString(body) {
 		t.Error("index.html must load app.js externally (inline script is blocked by CSP)")
 	}
 	// 反例保护：出现内联 <script>...</script> 内容块即为回归

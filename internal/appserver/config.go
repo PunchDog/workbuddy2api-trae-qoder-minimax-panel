@@ -5,11 +5,13 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/linguo2625469/workbuddy2api-panel/internal/prompt"
@@ -398,16 +400,92 @@ func ParseConfig(raw []byte) (*Config, error) {
 	return ParseConfigInto(raw, Default())
 }
 
+// GenerateAPIKey 生成 sk- 前缀随机密钥（18 字节熵 → RawURL base64，与 WriteDefault 同口径）。
+func GenerateAPIKey() (string, error) {
+	raw := make([]byte, 18)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("gen api_key: %w", err)
+	}
+	return "sk-" + base64.RawURLEncoding.EncodeToString(raw), nil
+}
+
+// EnsureAPIKey api_key 未填写时自动生成 sk- 密钥并写回配置文件（保留用户手写
+// 的未知键），使网关/面板调用鉴权始终生效——空 key 不再等于裸暴露。
+// 已填写时原样返回 ("", nil)。写回失败仍返回生成的 key + err：调用方记日志后
+// 用内存 key 继续启动（只读挂载等场景不阻塞服务）。path 空 = 不落盘。
+func EnsureAPIKey(c *Config, path string) (string, error) {
+	if strings.TrimSpace(c.APIKey) != "" {
+		return "", nil
+	}
+	key, err := GenerateAPIKey()
+	if err != nil {
+		return "", err
+	}
+	c.APIKey = key
+	if path == "" {
+		return key, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return key, fmt.Errorf("read config for api_key write-back: %w", err)
+	}
+	var m map[string]any
+	if json.Unmarshal(raw, &m) != nil {
+		m = map[string]any{}
+	}
+	m["api_key"] = key
+	out, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return key, fmt.Errorf("marshal config for api_key write-back: %w", err)
+	}
+	if err := writeConfigAtomic(path, out); err != nil {
+		return key, err
+	}
+	return key, nil
+}
+
+// writeConfigAtomic 原子替换配置文件；Docker 单文件 bind mount 无法 rename
+// （Linux EBUSY）时回退原地写（与面板保存配置同一套部署形态兼容）。
+func writeConfigAtomic(path string, out []byte) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, out, 0o600); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		if !errors.Is(err, syscall.EBUSY) {
+			return fmt.Errorf("replace config: %w", err)
+		}
+		f, openErr := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0o600)
+		if openErr != nil {
+			_ = os.Remove(tmp)
+			return fmt.Errorf("replace config (bind mount fallback): %w", openErr)
+		}
+		_, writeErr := f.Write(out)
+		if writeErr == nil {
+			writeErr = f.Sync()
+		}
+		closeErr := f.Close()
+		// 写失败时保留 tmp（挂载文件已被 O_TRUNC 破坏，tmp 里是完整新内容，可手工恢复）。
+		if writeErr != nil {
+			return fmt.Errorf("replace config (bind mount fallback, 完整新内容保留在 %s): %w", tmp, writeErr)
+		}
+		_ = os.Remove(tmp)
+		if closeErr != nil {
+			return fmt.Errorf("replace config (bind mount fallback): %w", closeErr)
+		}
+	}
+	return nil
+}
+
 // WriteDefault 在 path 落一份推荐配置（首次运行自动生成，双击即开免手工复制样例）。
 // 值取自 Default()（含超时/熔断/签到排程等推荐值），api_key 用 crypto/rand 随机生成：
 // 安全默认优于示例占位符（listen 绑定 0.0.0.0，空 key 会把网关裸暴露给局域网）。
 // 返回生成的 key 供启动日志透出。已存在时经 O_EXCL 原子拒绝，绝不改写用户配置。
 func WriteDefault(path string) (string, error) {
-	raw := make([]byte, 18)
-	if _, err := rand.Read(raw); err != nil {
-		return "", fmt.Errorf("gen api_key: %w", err)
+	key, err := GenerateAPIKey()
+	if err != nil {
+		return "", err
 	}
-	key := "sk-" + base64.RawURLEncoding.EncodeToString(raw)
 	c := Default()
 	c.APIKey = key
 	_ = c.normalize() // Default() 全合法，normalize 仅补齐 header/idle 超时的展示值

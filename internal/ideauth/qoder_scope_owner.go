@@ -57,9 +57,13 @@ func qoderCollectIDs(v any, out map[string]bool) {
 	}
 }
 
-// qoderClientScopeBuckets 解析客户端数据文件，返回所有 scope 桶。
+// qoderClientScopeBuckets 解析客户端数据文件（自动探测目录），返回所有 scope 桶。
 func qoderClientScopeBuckets() []qoderScopeBucket {
-	dir := QoderDataDir()
+	return qoderClientScopeBucketsInDir(QoderDataDir())
+}
+
+// qoderClientScopeBucketsInDir 解析指定客户端目录的数据文件，返回所有 scope 桶。
+func qoderClientScopeBucketsInDir(dir string) []qoderScopeBucket {
 	var buckets []qoderScopeBucket
 
 	// 主文件：scope = agentAccountScope，桶里的 id 取自主文件整棵树。
@@ -97,12 +101,18 @@ func qoderClientScopeBuckets() []qoderScopeBucket {
 }
 
 // qoderAccountScopeByRuntime 用服务端 /api/v1/agents 与客户端 scope 桶求交集，
-// 解出**这个账号自己的** scope。解不出来返回 ("", false)。
+// 解出**这个账号自己的** scope（自动探测目录）。解不出来返回 ("", false)。
 func qoderAccountScopeByRuntime(auth *QoderAuth, dev *QoderDevice, scopeHint string) (string, bool) {
+	return qoderAccountScopeByRuntimeInDir(QoderDataDir(), auth, dev, scopeHint)
+}
+
+// qoderAccountScopeByRuntimeInDir 指定客户端目录版本：scope 桶取自 dir，
+// 上游 base 也按 dir 推断的 realm 选（国内版账号打 openapi.qoder.com.cn）。
+func qoderAccountScopeByRuntimeInDir(dir string, auth *QoderAuth, dev *QoderDevice, scopeHint string) (string, bool) {
 	if auth == nil || strings.TrimSpace(auth.Token) == "" {
 		return "", false
 	}
-	buckets := qoderClientScopeBuckets()
+	buckets := qoderClientScopeBucketsInDir(dir)
 	if len(buckets) == 0 {
 		return "", false
 	}
@@ -110,7 +120,7 @@ func qoderAccountScopeByRuntime(auth *QoderAuth, dev *QoderDevice, scopeHint str
 		dev = &QoderDevice{}
 	}
 	mine := map[string]bool{}
-	for _, b := range qoderOpenAPIBaseListForScope(scopeHint) {
+	for _, b := range qoderOpenAPIBaseList(qoderRealmFromDataDir(dir), scopeHint) {
 		st, raw, err := qoderDo(b, "/api/v1/agents", http.MethodGet, auth.Token, nil, dev)
 		if err != nil || st != http.StatusOK {
 			continue

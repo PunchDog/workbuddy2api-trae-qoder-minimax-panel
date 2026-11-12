@@ -44,7 +44,7 @@ func QoderSwitchedCheckinAll(logf func(string)) []QoderSwitchResult {
 	}
 	orig := ""
 	if a, err := ReadQoderAuth(); err == nil {
-		orig = strings.TrimSpace(a.User.Email)
+		orig = strings.TrimSpace(QoderAuthKey(a))
 	}
 
 	out := make([]QoderSwitchResult, 0, len(pool.Accounts))
@@ -54,7 +54,7 @@ func QoderSwitchedCheckinAll(logf func(string)) []QoderSwitchResult {
 		}
 		email := strings.TrimSpace(snap.Email)
 		if email == "" {
-			email = strings.TrimSpace(snap.Auth.User.Email)
+			email = strings.TrimSpace(QoderAuthKey(snap.Auth))
 		}
 		if email == "" {
 			continue

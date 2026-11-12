@@ -1,6 +1,10 @@
 'use strict';
 /* ── 状态 ─────────────────────────────────────────────────────────── */
 const LS_KEY = 'wb2api.key', LS_THEME = 'wb2api.theme';
+/* PANEL_BUILD 构建指纹（服务端注入 app.js 内容哈希）。容器/二进制更新后
+   旧标签页内存里仍是旧 JS（SPA 不自动重载）——轮询 app.js 的 ETag 失配时
+   弹刷新条，避免「改了没生效」的静默错配。 */
+const PANEL_BUILD = '__JS_BUILD__';
 let theme = localStorage.getItem(LS_THEME) || 'auto';   // auto | light | dark
 let view = 'checkin';   // 账号池视图已移除（2026-10-24）：签到池是默认首页
 let overviewData = null, cfgLoaded = null;
@@ -39,6 +43,20 @@ $('btnTheme').onclick = () => {
   applyTheme();
 };
 applyTheme();
+
+/* ── 构建失配检测（旧标签页提示刷新）─────────────────────────────────
+   每 60s HEAD 一次 app.js：ETag 即服务端构建指纹，与本页 PANEL_BUILD 不同
+   说明二进制/容器已更新而本页还在跑旧 JS → 显示顶部刷新条。不自动 reload，
+   避免打断用户正在进行的签到/切号操作。 */
+if ($('btnBuildReload')) $('btnBuildReload').onclick = () => location.reload();
+setInterval(async () => {
+  if (!PANEL_BUILD || PANEL_BUILD.indexOf('__') === 0) return; // 未注入（开发态）不检测
+  try {
+    const r = await fetch('app.js', { method: 'HEAD', cache: 'no-store' });
+    const tag = (r.headers.get('ETag') || '').replace(/"/g, '');
+    if (tag && tag !== PANEL_BUILD && $('buildStale')) $('buildStale').hidden = false;
+  } catch (e) { /* 网络抖动忽略，下一轮再查 */ }
+}, 60000);
 
 /* ── 请求 ─────────────────────────────────────────────────────────── */
 // 在途请求合并：同一个 path 的并发请求共用**同一个** Promise。
@@ -440,7 +458,7 @@ function go(v) {
   if (v === 'models') { if (!$('mdBody').children.length) loadModels(); loadModelQueue(); }
   if (v === 'config') loadConfig();
   if (v === 'logs') loadLogs();
-  if (v === 'usage') { loadUsage(); loadUsageOfficial(); }
+  if (v === 'usage') { loadUsage(); loadUsageOfficial(); loadUsageQoder(); }
   if (v === 'packages') { loadPackages(); loadPkIdea(true); }
   if (v === 'taskscenter') { reattachQueueView(); loadIdeaTasks(true); }
   if (v === 'checkin') { loadTraeStatus(true); loadTraeCredits(true); loadCheckinPool(true); loadQkCredits(true); loadWkCredits(true); loadMmCredits(true); loadCaCredits(true); }
@@ -901,7 +919,11 @@ function mdMatch(m, f) {
       if (!text.includes(kw)) return false;
     }
   }
-  if (f.realm && !String(m.id || '').startsWith(f.realm + ':')) return false;
+  // Qoder 双区按 qrealm 字段筛（id 统一 qoder: 前缀，兼容旧版前端的前缀筛选）；
+  // 其余域仍按 id 前缀（cn:/global: 网关路由协议）。
+  if (f.realm === 'qoder-cn' || f.realm === 'qoder-intl') {
+    if (m.qrealm !== f.realm.slice(6)) return false;
+  } else if (f.realm && !String(m.id || '').startsWith(f.realm + ':')) return false;
   if (f.cap === 'tool' && !m.supports_tool_call) return false;
   if (f.cap === 'vision' && !m.supports_images) return false;
   if (f.cap === 'reasoning' && !m.supports_reasoning) return false;
@@ -933,6 +955,11 @@ function mdSortList(list, f) {
 // mdBusyCell 用近 72 小时本地请求尝试延迟相对同域中位数估计繁忙程度。
 // 该指标不是官方负载；低于 5 次样本不分类，避免小样本制造确定性印象。
 function mdBusyCell(id) {
+  // Qoder 双区：客户端直连上游，不经本网关，没有本地请求样本可言。
+  const idStr = String(id || '');
+  if (idStr.startsWith('qoder:') || idStr.startsWith('qoder-')) {
+    return '<td><span class="tag mute">—</span><div class="note">客户端直连</div></td>';
+  }
   const parts = String(id || '').split(':');
   const realm = parts.length > 1 && (parts[0] === 'cn' || parts[0] === 'global') ? parts[0] : '';
   const key = realm ? realm + ':' + parts.slice(1).join(':') : '';
@@ -954,10 +981,13 @@ function mdRowHtml(m, pr) {
   const eff = (m.supported_efforts || []).slice();
   if (m.can_disable_thinking && eff.length && !eff.includes('off')) eff.push('off（可关）');
   const effs = eff.length ? eff.map(e => '<span class="tag warn">' + esc(e) + '</span>').join(' ')
-    : '<span style="color:var(--ink-3);font-size:12.5px">' + (m.supports_reasoning ? '固定档 · 默认 ' + esc(m.default_effort || '?') : '不支持思考') + '</span>';
+    : '<span style="color:var(--ink-3);font-size:12.5px">' + (m.supports_reasoning ? '固定档' + (m.default_effort ? ' · 默认 ' + esc(m.default_effort) : '') : '不支持思考') + '</span>';
   // 能力徽标：默认模型 / 工具调用 / 视觉 / 纯推理（上游目录全字段透出，缺失不显示）
   const caps = [];
+  if (m.qrealm) caps.push('<span class="tag ' + (m.qrealm === 'cn' ? 'ok' : 'warn') + '">' + (m.qrealm === 'cn' ? '国内版' : '国际版') + '</span>');
   if (m.is_default) caps.push('<span class="tag ok">默认</span>');
+  if (m.not_enabled) caps.push('<span class="tag mute" title="官方目录标记当前未开放（套餐/版本限制），仅展示能力">未开放</span>');
+  if (m.catalog_source === 'snapshot') caps.push('<span class="tag mute" title="官方实时目录拉取失败，展示嵌入快照（可能落后官方上新）；恢复后 1 分钟内自动回实时">静态快照</span>');
   if (m.supports_tool_call) caps.push('<span class="tag warn">工具</span>');
   if (m.supports_images) caps.push('<span class="tag warn">视觉</span>');
   if (m.supports_reasoning && !m.can_disable_thinking) caps.push('<span class="tag warn">思考常开</span>');
@@ -1499,23 +1529,48 @@ async function pollTraeLogin() {
 $('btnTraeStart').onclick = startTraeLogin;
 $('btnTraeStop').onclick = stopTraeBrowser;
 
-/* ── Qoder 添加（浏览器登录 / 捕获本机当前登录态）────────────────────
+/* ── Qoder 添加（国内版/国际版 + 浏览器登录 / 捕获本机当前登录态）────────
    Qoder 的可用登录态只在桌面客户端里（网页版拿不到 IDE 能用的令牌），所以
    「浏览器登录」= 启动客户端 → 在客户端里用浏览器/扫码完成鉴权 → 面板盯着
-   客户端登录态，一变就自动收进号池。 */
+   客户端登录态，一变就自动收进号池。
+   版本单选（qoderRealm）决定读哪个客户端目录、打哪套域名。 */
+/* qoderCanCapture 面板能否在本机收录客户端登录态（仅 Windows：DPAPI/客户端/
+   本机浏览器都是 Windows 能力）。Linux/容器部署时为 false，三个添加按钮禁用，
+   提示改用宿主机 qoder-capture 工具。由 loadQoderAddTab 从后端 platform 字段刷新。 */
+let qoderCanCapture = true;
+/* qoderAddRealm 读添加弹窗里选中的版本（缺省国内版，与 WorkBuddy/MiniMax 一致）。 */
+function qoderAddRealm() {
+  const r = document.querySelector('input[name="qoderRealm"]:checked');
+  return r ? r.value : 'cn';
+}
+/* setQoderRealmRadio 按检测到的客户端目录预选版本（qodercn → cn，其余 → intl）。 */
+function setQoderRealmRadio(realm) {
+  const r = document.querySelector('input[name="qoderRealm"][value="' + (realm === 'intl' ? 'intl' : 'cn') + '"]');
+  if (r) r.checked = true;
+}
 function resetQoderPanel() {
   const dn = $('addQoderDone'), er = $('addQoderErr');
   if (dn) dn.hidden = true;
   if (er) er.hidden = true;
   const b = $('btnQoderCapture');
-  if (b) { b.disabled = false; b.textContent = '添加当前 Qoder 账号'; }
+  if (b) { b.disabled = !qoderCanCapture; b.textContent = '添加当前 Qoder 账号'; }
   const lb = $('btnQoderLogin');
-  if (lb) { lb.disabled = false; lb.textContent = '浏览器登录并添加'; }
+  if (lb) { lb.disabled = !qoderCanCapture; lb.textContent = '浏览器登录并添加'; }
+  const wb = $('btnQoderWeb');
+  if (wb) wb.disabled = !qoderCanCapture;
   const box = $('addQoderLoginBox');
   if (box) box.hidden = true;
   const le = $('addQoderLoginErr');
   if (le) { le.hidden = true; le.textContent = ''; }
   stopQoderLoginPoll();
+  // 授权登录区一并复位（按钮不禁用：它不依赖本机客户端，容器里也能用）。
+  stopQoderDevPoll();
+  const db = $('addQoderDevBox');
+  if (db) db.hidden = true;
+  const de = $('addQoderDevErr');
+  if (de) { de.hidden = true; de.textContent = ''; }
+  const dv = $('btnQoderDev');
+  if (dv) { dv.disabled = false; dv.textContent = '浏览器授权登录'; }
 }
 let qoderLoginTimer = null;
 function stopQoderLoginPoll() { if (qoderLoginTimer) { clearTimeout(qoderLoginTimer); qoderLoginTimer = null; } }
@@ -1525,13 +1580,64 @@ function stopQoderLoginPoll() { if (qoderLoginTimer) { clearTimeout(qoderLoginTi
    每个号一份独立 profile = 一份独立网页会话 → 各领各的，不互相抢名额。 */
 let qoderWebTimer = null;
 function stopQoderWebPoll() { if (qoderWebTimer) { clearTimeout(qoderWebTimer); qoderWebTimer = null; } }
+/* ── Qoder 浏览器授权登录（OAuth 设备流，容器可用）─────────────────────
+   面板只生成授权链接 + 轮询上游；登录在用户自己的浏览器里完成（Windows 上
+   任意浏览器），不依赖 DPAPI/本机客户端/本机浏览器 —— Docker 部署的主登录路径。 */
+let qoderDevTimer = null;
+function stopQoderDevPoll() { if (qoderDevTimer) { clearTimeout(qoderDevTimer); qoderDevTimer = null; } }
+async function doQoderDevLogin() {
+  const b = $('btnQoderDev');
+  b.disabled = true; b.textContent = '正在获取授权链接…';
+  $('addQoderDevBox').hidden = false;
+  $('addQoderDevErr').hidden = true;
+  $('addQoderDevUrl').innerHTML = '';
+  $('addQoderDevState').textContent = '正在生成授权链接…';
+  try {
+    const d = await api('ide/qoder/devlogin/start', { method: 'POST', body: JSON.stringify({ realm: qoderAddRealm() }) });
+    // 授权链接做成可点击链接（新标签打开）；长 URL 换行显示。
+    const a = document.createElement('a');
+    a.href = d.auth_url; a.target = '_blank'; a.rel = 'noopener';
+    a.textContent = d.auth_url;
+    $('addQoderDevUrl').appendChild(a);
+    $('addQoderDevState').textContent = d.message || '在浏览器打开链接完成登录授权，完成后自动检测…';
+    stopQoderDevPoll();
+    const tick = async () => {
+      try {
+        const r = await api('ide/qoder/devlogin/poll?state=' + encodeURIComponent(d.state));
+        if (r.done) {
+          stopQoderDevPoll();
+          $('addQoderDevState').textContent = r.ok ? '授权成功，已加入号池' : '授权未完成';
+          $('addQoderDone').hidden = false;
+          $('addQoderDone').textContent = r.message || '';
+          if (!r.ok) { $('addQoderDevErr').hidden = false; $('addQoderDevErr').textContent = r.message || '授权失败'; }
+          loadQoderAccounts(true);
+          loadCkQoder(true);
+          return;
+        }
+        $('addQoderDevState').textContent = r.message || '等待浏览器完成授权…';
+        if (r.expired) { stopQoderDevPoll(); return; }
+      } catch (e) {
+        stopQoderDevPoll();
+        $('addQoderDevErr').hidden = false;
+        $('addQoderDevErr').textContent = e.message;
+        return;
+      }
+      qoderDevTimer = setTimeout(tick, 2500);
+    };
+    qoderDevTimer = setTimeout(tick, 2500);
+  } catch (e) {
+    $('addQoderDevErr').hidden = false; $('addQoderDevErr').textContent = e.message;
+    $('addQoderDevBox').hidden = true;
+  } finally { b.disabled = false; b.textContent = '浏览器授权登录'; }
+}
+if ($('btnQoderDev')) $('btnQoderDev').onclick = doQoderDevLogin;
 async function doQoderWebLogin(email) {
   const b = $('btnQoderWeb');
   b.disabled = true; b.textContent = '正在打开浏览器…';
   $('addQoderWebBox').hidden = false;
   $('addQoderWebErr').hidden = true;
   try {
-    const d = await api('ide/qoder/web/start', { method: 'POST', body: JSON.stringify({ email: email }) });
+    const d = await api('ide/qoder/web/start', { method: 'POST', body: JSON.stringify({ email: email, realm: qoderAddRealm() }) });
     $('addQoderWebState').textContent = d.message || '已打开浏览器，请登录要添加的 Qoder 账号…';
     stopQoderWebPoll();
     const tick = async () => {
@@ -1566,7 +1672,7 @@ async function doQoderWebLogin(email) {
 if ($('btnQoderWeb')) $('btnQoderWeb').onclick = () => {
   // 网页登录按号走：先问用户要给哪个号建会话（号池里选，或手填）。
   const cur = $('addQoderCur') ? ($('addQoderCur').getAttribute('data-email') || '') : '';
-  const email = prompt('给哪个 Qoder 账号建立网页登录会话？\n填邮箱（面板会为它建一个独立的浏览器会话，登录一次即可）：', cur || '');
+  const email = prompt('给哪个 Qoder 账号建立网页登录会话？\n填邮箱（手机号注册的账号填手机号；面板会为它建一个独立的浏览器会话，登录一次即可）：', cur || '');
   if (!email) return;
   doQoderWebLogin(email.trim());
 };
@@ -1578,7 +1684,7 @@ async function doQoderLogin() {
   $('addQoderLoginBox').hidden = false;
   $('addQoderLoginErr').hidden = true;
   try {
-    const d = await api('ide/qoder/login/start', { method: 'POST', body: JSON.stringify({ logout: logout }) });
+    const d = await api('ide/qoder/login/start', { method: 'POST', body: JSON.stringify({ logout: logout, realm: qoderAddRealm() }) });
     $('addQoderLoginState').textContent = d.message || '已启动 Qoder 客户端，请在客户端里点「浏览器登录 / 扫码登录」完成鉴权…';
     stopQoderLoginPoll();
     const tick = async () => {
@@ -1621,6 +1727,25 @@ async function loadQoderAddTab() {
   cur.innerHTML = '<span class="dots">读取中</span>';
   try {
     const d = await api('ide/qoder/accounts');
+    // 按检测到的客户端目录预选版本（国内版客户端 → cn）。
+    if (d.client_dir) setQoderRealmRadio(d.client_dir.indexOf('qodercn') >= 0 ? 'cn' : 'intl');
+    // 平台能力：客户端登录态收录（DPAPI 解密/拉起客户端/本机浏览器）仅 Windows 可用。
+    qoderCanCapture = d.platform ? d.platform === 'windows' : true;
+    const pf = $('addQoderPlatform');
+    const btns = [$('btnQoderWeb'), $('btnQoderLogin'), $('btnQoderCapture')];
+    if (!qoderCanCapture) {
+      if (pf) {
+        pf.hidden = false;
+        pf.textContent = '面板运行在 ' + (d.platform || '非 Windows') + ' 环境（如 Linux 容器）：读不了 Windows 客户端的登录态（DPAPI 仅 Windows 可用）。' +
+          '添加账号请用上方「浏览器授权登录」（容器可用）；或在 Windows 宿主机运行 qoder-capture.bat 收录客户端已登录的号。';
+      }
+      btns.forEach(b => { if (b) { b.disabled = true; b.title = '仅 Windows 环境可用（当前为 ' + (d.platform || '非 Windows') + '）'; } });
+      cur.className = 'state';
+      cur.textContent = '容器部署模式：点「浏览器授权登录」，在 Windows 浏览器里完成登录即可收号。';
+      return;
+    }
+    if (pf) pf.hidden = true;
+    btns.forEach(b => { if (b) { b.disabled = false; b.title = ''; } });
     cur.className = 'state';
     cur.textContent = d.current_email
       ? '本机当前登录：' + (d.current_name || '') + ' <' + d.current_email + '>'
@@ -1632,7 +1757,7 @@ async function doQoderCapture() {
   b.disabled = true; b.textContent = '添加中…';
   $('addQoderDone').hidden = true; $('addQoderErr').hidden = true;
   try {
-    const d = await api('ide/qoder/add', { method: 'POST', body: '{}' });
+    const d = await api('ide/qoder/add', { method: 'POST', body: JSON.stringify({ realm: qoderAddRealm() }) });
     $('addQoderDone').hidden = false;
     $('addQoderDone').textContent = (d.added ? '已添加：' : '已更新：') + (d.name || '') + ' <' + d.email + '>';
     loadQoderAccounts(true);
@@ -2011,7 +2136,7 @@ function reloadCurrentView(skipOverview) {
   else if (view === 'logs') loadLogs();
   else if (view === 'taskscenter') { reattachQueueView(); loadIdeaTasks(true); }
   else if (view === 'checkin') { loadTraeStatus(true); loadTraeCredits(true); loadCheckinPool(true); loadQkCredits(true); loadWkCredits(true); loadMmCredits(true); loadCaCredits(true); }
-  else if (view === 'usage') { loadUsage(); loadUsageOfficial(); }
+  else if (view === 'usage') { loadUsage(); loadUsageOfficial(); loadUsageQoder(); }
   else if (view === 'packages') { loadPackages(); loadPkIdea(true); }
   else if (view === 'models') { loadModels(); loadModelQueue(); }
   restoreScrollTo(y);
@@ -3845,6 +3970,67 @@ function renderOfficialChart(series) {
 if ($('btnUsageOfficial')) $('btnUsageOfficial').onclick = loadUsageOfficial;
 if ($('usOffWindow')) $('usOffWindow').onchange = loadUsageOfficial;
 
+/* ── Qoder 用量（客户端直连额度）─────────────────────────────────────
+   官方用量/网关用量两块只统计 WorkBuddy 与经本网关的请求；Qoder 由客户端
+   直连上游，额度要逐号问 openapi。按国内版/国际版分组，与号池 realm 一致。 */
+async function loadUsageQoder() {
+  const st = $('usQoderState'), box = $('usQoderGroups');
+  if (!st || !box) return;
+  st.hidden = false; st.className = 'state'; st.innerHTML = '<span class="dots">查询中</span>'; box.innerHTML = '';
+  try {
+    const d = await api('ide/qoder/accounts');
+    const arr = d.accounts || [];
+    const cur = d.current_email || '';
+    const rows = arr.length ? arr : (cur ? [{ email: cur, name: d.current_name || '当前登录', current: true }] : []);
+    if (!rows.length) {
+      st.hidden = false; st.className = 'state'; st.textContent = 'Qoder 号池为空，先添加账号再查用量。';
+      $('usQoderNote').textContent = '—';
+      return;
+    }
+    const usages = await Promise.all(rows.map(a =>
+      api('ide/qoder/usage?email=' + encodeURIComponent(a.email || '')).catch(() => null)));
+    const parts = [];
+    let okCount = 0;
+    for (const [realm, label] of [['cn', 'Qoder 国内版'], ['intl', 'Qoder 国际版']]) {
+      const idxs = [];
+      rows.forEach((a, i) => { if ((a.realm || 'intl') === realm) idxs.push(i); });
+      if (!idxs.length) continue;
+      const trs = idxs.map(i => {
+        const a = rows[i], u = usages[i];
+        const who = '<td class="who"><div class="nm">' + esc(a.name || a.email || '未命名') +
+          (a.current ? '<span class="tag mute" style="margin-left:6px">当前</span>' : '') + '</div>' +
+          '<div class="id">' + esc(a.email || '') + '</div></td>';
+        if (!u || u.phase !== 'ok') {
+          return '<tr>' + who + '<td colspan="4"><span class="note">' + esc((u && u.msg) || '额度查询失败') + '</span></td></tr>';
+        }
+        okCount++;
+        const pkg = u.user_quota || {}, addon = u.add_on_quota || {};
+        const remain = Number(pkg.remaining || 0) + Number(addon.remaining || 0);
+        const used = Number(pkg.used || 0) + Number(addon.used || 0);
+        const expMs = Number(u.expires_at_ms || 0);
+        const expText = !expMs ? '不过期' :
+          (new Date(expMs).getFullYear() >= 9999 ? '不过期' : new Date(expMs).toLocaleDateString('zh-CN'));
+        return '<tr>' + who +
+          '<td>' + esc(u.plan_tier_name || u.plan_tier || '—') + '</td>' +
+          '<td class="num"><b>' + remain.toLocaleString('zh-CN') + '</b>' +
+          '<div class="note">套餐 ' + Number(pkg.remaining || 0) + ' + 附加 ' + Number(addon.remaining || 0) + '</div></td>' +
+          '<td class="num">' + used.toLocaleString('zh-CN') + '</td>' +
+          '<td class="num">' + esc(expText) + '</td></tr>';
+      }).join('');
+      parts.push('<div class="pad"><div class="ck-group">' + label + ' · ' + idxs.length + ' 个号</div></div>' +
+        '<div class="tbl-wrap"><table class="acc"><thead><tr><th>账号</th><th>套餐</th>' +
+        '<th class="num">剩余 Credits</th><th class="num">已用</th><th class="num">到期</th></tr></thead>' +
+        '<tbody>' + trs + '</tbody></table></div>');
+    }
+    box.innerHTML = parts.join('');
+    st.hidden = true;
+    $('usQoderNote').textContent = rows.length + ' 个号 · ' + okCount + ' 个查询成功 · 上游实时额度（非网关统计）';
+  } catch (e) {
+    st.hidden = false; st.className = 'state err'; st.textContent = e.message;
+  }
+}
+if ($('btnUsageQoder')) $('btnUsageQoder').onclick = loadUsageQoder;
+
 /* ── 积分构成 ─────────────────────────────────────────────────────── */
 /* 一个账号的余额是若干积分包之和。包按来源命名（「国内运营裂变包」「拉新权益包」
    「个人体验版」…），面额从 6 到 1500 不等，且**按次发放**。所以两个任务完成度
@@ -4572,22 +4758,24 @@ async function loadPkIdea(quiet) {
       parts.push('<div class="pk-grid">' + cards + '</div>');
     }
 
-    // Qoder：号池逐号查，条形展示套餐内 / 附加（签到）两组 Credits
-    parts.push('<div class="pad"><div class="ck-group">Qoder</div></div>');
+    // Qoder：号池逐号查，条形展示套餐内 / 附加（签到）两组 Credits；
+    // 按国内版/国际版分组（realm），卡片角标同显版本，跨版本对比不混排。
     const qarr = (qa && qa.accounts) || (qd && qd.email ? [{ email: qd.email, name: qd.name, current: true }] : []);
     if (!qarr.length) {
+      parts.push('<div class="pad"><div class="ck-group">Qoder</div></div>');
       parts.push('<div class="state">未找到 Qoder 账号。</div>');
     } else {
       const usages = await Promise.all(qarr.map(a => {
         if (a.current && qd && qd.phase === 'ok') return Promise.resolve(qd);
         return api('ide/qoder/usage?email=' + encodeURIComponent(a.email || '')).catch(() => null);
       }));
-      const cards = qarr.map((a, i) => {
+      const qRealmChip = a => '<span class="realm">' + (a.realm === 'cn' ? '国内版' : '国际版') + '</span>';
+      const cardOf = (a, i) => {
         const u = usages[i];
         if (!u || u.phase !== 'ok') {
           return '<div class="pk-card"><div class="who"><span class="nm">' +
             esc(a.name || a.email || 'Qoder 账号') +
-            '</span><span class="realm">Qoder</span></div><div class="sub">' + esc(a.email || '') +
+            '</span>' + qRealmChip(a) + '</div><div class="sub">' + esc(a.email || '') +
             '</div><div class="err">' + esc((u && u.msg) || '额度查询失败') + '</div></div>';
         }
         const pkg = u.user_quota || {}, addon = u.add_on_quota || {};
@@ -4609,7 +4797,7 @@ async function loadPkIdea(quiet) {
             '到期：' + new Date(expMs).toLocaleDateString('zh-CN'));
         return '<div class="pk-card">' +
           '<div class="who"><span class="nm">' + esc(a.name || a.email || 'Qoder 账号') + '</span>' +
-          (a.current ? '<span class="realm">当前</span>' : '<span class="realm">Qoder</span>') + '</div>' +
+          qRealmChip(a) + (a.current ? '<span class="realm">当前</span>' : '') + '</div>' +
           '<div class="sub">' + esc(a.email || '') + '</div>' +
           '<div class="big">' + fmtTok(remain) + '</div>' +
           cardSub('共 ' + fmtTok(total) + ' · 已用 ' + fmtTok(pkgUsed + addonUsed) + ' · ' +
@@ -4618,8 +4806,15 @@ async function loadPkIdea(quiet) {
           '<div class="pk-legend">' + legend + '</div>' +
           '<div class="note" style="margin-top:7px">签到奖励：+100 Credits/日 · ' + expText + '</div>' +
           '</div>';
-      }).join('');
-      parts.push('<div class="pk-grid">' + cards + '</div>');
+      };
+      // 国内版在前；某版本无账号则整组不渲染（不留空标题）。
+      for (const [realm, label] of [['cn', 'Qoder 国内版'], ['intl', 'Qoder 国际版']]) {
+        const idxs = [];
+        qarr.forEach((a, i) => { if ((a.realm || 'intl') === realm) idxs.push(i); });
+        if (!idxs.length) continue;
+        parts.push('<div class="pad"><div class="ck-group">' + label + '</div></div>');
+        parts.push('<div class="pk-grid">' + idxs.map(i => cardOf(qarr[i], i)).join('') + '</div>');
+      }
     }
     box.innerHTML = parts.join('');
     st.hidden = true;
@@ -4641,9 +4836,13 @@ async function loadQoderAccounts(quiet) {
     const d = await api('ide/qoder/accounts');
     const arr = d.accounts || [];
     const cur = d.current_email || '';
+    // 据数据目录名显示本机装的是哪个 Qoder 客户端（国内版 com.qodercn / 国际版 com.qoder）。
+    const clientTag = d.client_dir === 'com.qodercn.app.stable'
+      ? ' · 本机客户端：国内版'
+      : (d.client_dir === 'com.qoder.app.stable' ? ' · 本机客户端：国际版' : '');
     $('qoderSummary').textContent = cur
-      ? '当前：' + cur + (d.current_expires ? '（到期 ' + String(d.current_expires).slice(0, 10) + '）' : '')
-      : '当前未登录';
+      ? '当前：' + cur + (d.current_expires ? '（到期 ' + String(d.current_expires).slice(0, 10) + '）' : '') + clientTag
+      : '当前未登录' + clientTag;
     if (!arr.length) {
       st.hidden = false; st.className = 'state';
       st.textContent = cur
@@ -4659,6 +4858,10 @@ async function loadQoderAccounts(quiet) {
         : (a.expired
           ? UI.badge('todo', '!', '凭证过期')
           : UI.badge('warn', '○', '可切换'));
+      // Qoder 账号也分国内版/国际版，跟 WorkBuddy 一样打 realm-tag（cn=国内版、intl=国际版）。
+      const realmTag = a.realm === 'intl'
+        ? ' <span class="realm-tag">国际版</span>'
+        : (a.realm === 'cn' ? ' <span class="realm-tag">国内版</span>' : '');
       // 操作列固定三格：切号 / 续期 / 移除。
       // 不能切时**照样显示按钮**（禁用 + 说明原因），不再出现"这一行没有切换按钮、
       // 那一行有"的情况。
@@ -4668,7 +4871,7 @@ async function loadQoderAccounts(quiet) {
       const renew = UI.sub('data-qoder-renew', a.email, '续期', '用 refresh_token 换新 token');
       const rm = UI.sub('data-qoder-remove', a.email, '移除');
       return '<div class="arow" data-acc="' + esc(a.email) + '">' +
-        '<div class="who"><div class="nm">' + esc(identName(a.name, a.email, '未命名')) + '</div>' +
+        '<div class="who"><div class="nm">' + esc(identName(a.name, a.email, '未命名')) + realmTag + '</div>' +
         '<div class="id">' + esc(identLabel(a.email, '未设置')) + '</div></div>' +
         '<div>' + status + '</div>' +
         '<div class="acts">' + renew + sw + rm + '</div>' +
@@ -5606,6 +5809,7 @@ function renderQoderRows(rows, arr, cur, st2) {
       : '';
     return '<div class="trow" data-qd-row="' + esc(email) + '">' +
       '<div class="who"><div class="nm">' + esc(identName(a.name, email, '未命名')) +
+      (a.realm ? '<span class="tag mute" style="margin-left:6px">' + (a.realm === 'cn' ? '国内版' : '国际版') + '</span>' : '') +
       (a.current ? '<span class="tag mute" style="margin-left:6px">当前登录</span>' : '') + groupTag + '</div>' +
       '<div class="id">' + esc(identLabel(email, '未设置')) + '</div>' + metaHTML + '</div>' +
       '<div class="credits" data-qk-cred="' + esc(email) + '"><span class="note">查询中…</span></div>' +
@@ -6463,9 +6667,10 @@ async function loadIdeaTasks(quiet) {
   if (!st || !list) return;
   if (!quiet) { st.hidden = false; st.className = 'state'; st.innerHTML = '<span class="dots">查询中</span>'; list.innerHTML = ''; }
   try {
-    const [td, qd] = await Promise.all([
+    const [td, qd, qa] = await Promise.all([
       api('trae/accounts').catch(() => null),
       api('ide/qoder/checkin-status').catch(() => null),
+      api('ide/qoder/accounts').catch(() => null),
     ]);
     const rows = [];
     const tarr = (td && td.accounts) || [];
@@ -6476,11 +6681,26 @@ async function loadIdeaTasks(quiet) {
         task: '每日签到（api.trae.cn）',
       });
     }
-    // ⚠️ checkin-status 的单号信息在 current 里（顶层没有 email 字段），
-    //    此前写 qd.email 永远取不到值 → Qoder 这一行根本不显示。
-    //    done 必须用 current 的**单号**口径（顶层 checked_in_today 是聚合值）。
+    // Qoder：号池**逐号**列任务（checkin-status 的 results），版本取 accounts 的
+    // realm。此前只取 current（客户端登录态）——容器里读不到 DPAPI，这一行恒缺失。
+    const qRealmOf = {};
+    ((qa && qa.accounts) || []).forEach(a => {
+      qRealmOf[String(a.email || '').toLowerCase()] = a.realm === 'cn' ? 'cn' : 'intl';
+    });
+    const qrows = (qd && qd.results) || [];
+    for (const r of qrows) {
+      if (!r || !r.email) continue;
+      const realm = qRealmOf[String(r.email).toLowerCase()] || 'intl';
+      rows.push({
+        who: r.name || r.email, sub: r.email,
+        platform: realm === 'cn' ? 'Qoder 国内版' : 'Qoder 国际版',
+        done: !!(r.checked_in_today || r.phase === 'claimed'),
+        task: '每日签到（100 Credits）',
+      });
+    }
+    // 号池为空但本机有登录态：仍展示当前号（单号口径，不用顶层聚合值）。
     const qc = (qd && qd.current) || null;
-    if (qc && qc.email) {
+    if (!qrows.length && qc && qc.email) {
       rows.push({
         who: qc.name || '当前登录', sub: qc.email, platform: 'Qoder',
         done: !!(qc.checked_in_today || qc.phase === 'claimed'),
@@ -6546,6 +6766,7 @@ async function loadQkCredits(quiet) {
     tb.innerHTML = rows.map(a => {
       const email = a.email || '';
       return '<tr><td class="who"><div class="nm">' + esc(identName(a.name, email, '未命名')) +
+        (a.realm ? '<span class="tag mute" style="margin-left:6px">' + (a.realm === 'cn' ? '国内版' : '国际版') + '</span>' : '') +
         (a.current ? '<span class="tag mute" style="margin-left:6px">当前</span>' : '') + '</div>' +
         '<div class="id">' + esc(identLabel(email, '未设置')) + '</div></td>' +
         '<td class="num" data-qk-total="' + esc(email) + '"><span class="note">查询中…</span></td>' +

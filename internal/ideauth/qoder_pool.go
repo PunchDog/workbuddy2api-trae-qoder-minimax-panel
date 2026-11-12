@@ -112,15 +112,20 @@ func UpdateQoderPool(fn func(*QoderPoolFile) error) error {
 	return saveQoderPool(f)
 }
 
-// UpsertQoderAccount 把当前登录态存入号池（按 Email 去重）。
+// UpsertQoderAccount 把当前登录态存入号池（自动探测客户端目录，按 Email 去重）。
 // 返回是否新增账号。
 func UpsertQoderAccount() (*QoderSnapshot, bool, error) {
-	snap, err := CaptureQoderSnapshot()
+	return UpsertQoderAccountForRealm("")
+}
+
+// UpsertQoderAccountForRealm 把指定版本客户端的登录态存入号池（空 realm = 自动探测）。
+func UpsertQoderAccountForRealm(realm string) (*QoderSnapshot, bool, error) {
+	snap, err := CaptureQoderSnapshotForRealm(realm)
 	if err != nil {
 		return nil, false, err
 	}
 	if strings.TrimSpace(snap.Email) == "" {
-		return nil, false, fmt.Errorf("当前 Qoder 未登录或邮箱为空")
+		return nil, false, fmt.Errorf("当前 Qoder 未登录或账号标识为空（邮箱/手机号均无）")
 	}
 
 	added := true
@@ -139,6 +144,22 @@ func UpsertQoderAccount() (*QoderSnapshot, bool, error) {
 		return nil, false, err
 	}
 	return snap, added, nil
+}
+
+// QoderPoolSnapshotsForRealm 返回号池中指定 realm 的快照（老账号无 Realm
+// 字段时按 RuntimeEnv 回落推断）。供实时目录拉取等需要凭证的按区操作使用。
+func QoderPoolSnapshotsForRealm(realm string) []*QoderSnapshot {
+	f, err := LoadQoderPool()
+	if err != nil {
+		return nil
+	}
+	var out []*QoderSnapshot
+	for _, a := range f.Accounts {
+		if a != nil && qoderRealmFromSnapshot(a) == realm {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // RemoveQoderAccount 从号池移除指定邮箱。
@@ -204,6 +225,8 @@ type QoderAccountView struct {
 	// QuotaGroup 该账号所在**同一人组**里的账号数（含自己）。
 	// >1 = 服务端已判定它与别的号是同一个人，每天只有一份每日额度。
 	QuotaGroup int `json:"quota_group,omitempty"`
+	// Realm 该账号所属版本："cn" 国内版 / "intl" 国际版。空 = 老账号尚未回填。
+	Realm string `json:"realm,omitempty"`
 }
 
 // ListQoderAccounts 返回号池账号视图，标记当前登录账号。
@@ -214,7 +237,7 @@ func ListQoderAccounts() ([]QoderAccountView, error) {
 	}
 	curEmail := ""
 	if cur, err := ReadQoderAuth(); err == nil {
-		curEmail = cur.User.Email
+		curEmail = QoderAuthKey(cur)
 	}
 	now := time.Now().UTC()
 	sizes := QoderQuotaGroupSizes(f.Accounts)
@@ -227,6 +250,10 @@ func ListQoderAccounts() ([]QoderAccountView, error) {
 			}
 		}
 		scope := QoderQuotaScopeKey(a)
+		realm := a.Realm
+		if realm == "" {
+			realm = qoderRealmFromSnapshot(a)
+		}
 		out = append(out, QoderAccountView{
 			Email:      a.Email,
 			UserID:     a.UserID,
@@ -240,6 +267,7 @@ func ListQoderAccounts() ([]QoderAccountView, error) {
 			Scope:      scope,
 			ScopeLabel: QoderQuotaScopeLabel(scope),
 			QuotaGroup: sizes[strings.ToLower(strings.TrimSpace(a.Email))],
+			Realm:      realm,
 		})
 	}
 	return out, nil
@@ -310,7 +338,7 @@ func QoderQuotaGroupKey(a *QoderSnapshot) string {
 	return "person:" + strings.Join(group, "|")
 }
 
-// qoderSnapshotEmail 取快照的账号邮箱。
+// qoderSnapshotEmail 取快照的账号标识（邮箱/手机号，见 QoderAuthKey）。
 func qoderSnapshotEmail(a *QoderSnapshot) string {
 	if a == nil {
 		return ""
@@ -319,7 +347,7 @@ func qoderSnapshotEmail(a *QoderSnapshot) string {
 		return em
 	}
 	if a.Auth != nil {
-		return strings.TrimSpace(a.Auth.User.Email)
+		return QoderAuthKey(a.Auth)
 	}
 	return ""
 }

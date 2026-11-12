@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -18,7 +19,10 @@ func (h *Handler) minimaxModels() []map[string]any {
 	if h.cfg.Minimax == nil {
 		return nil
 	}
-	models, err := h.cfg.Minimax.Models(h.baseCtx())
+	// 与 traeModels 同口径：目录拉取有界，避免 /v1/models 被单通道挂死。
+	ctx, cancel := context.WithTimeout(h.baseCtx(), 10*time.Second)
+	defer cancel()
+	models, err := h.cfg.Minimax.Models(ctx)
 	if err != nil || len(models) == 0 {
 		return nil
 	}

@@ -368,6 +368,17 @@ func QoderDeviceInfo() *QoderDevice {
 	return QoderDeviceInfoFor("", "intl")
 }
 
+// qoderDeviceForAuth 按该账号所属 realm 取设备指纹。
+// 探测/「同一人」判定必须用与账号一致的环境码派生的设备 —— 用 intl 设备探 cn 账号的
+// 活动（或反之）会拿到另一套身份，服务端判定结果失真。查不到 realm 时回落 intl。
+func qoderDeviceForAuth(auth *QoderAuth) *QoderDevice {
+	realm := qoderAuthRealm(auth)
+	if realm == "" {
+		realm = QoderRealmINTL
+	}
+	return QoderDeviceInfoFor("", realm)
+}
+
 func hostname() string {
 	h, err := os.Hostname()
 	if err != nil {
@@ -486,21 +497,43 @@ type QoderCheckinResult struct {
 	QuotaTakenBy string `json:"quota_taken_by,omitempty"`
 }
 
-// qoderOpenAPIBaseList 返回候选 base（按优先级）。默认国际服优先、国内兜底；
-// 可用 QODER_OPENAPI_BASE 固定单一 base。
-func qoderOpenAPIBaseList() []string {
+// qoderOpenAPIBaseListForRealm 按账号显式 realm 排 base 顺序：
+// intl 账号先打国际服（openapi.qoder.sh），cn 账号先打国内服（openapi.qoder.com.cn）。
+//
+// 排错顺序的代价是实打出来的：intl 账号先打国内服会拿到 401 TOKEN_EXPIRE
+// （"token is not active"），而它其实有**完全有效**的凭证 —— 401 极易被误读成
+// "token 失效"，面板于是显示"需要重新登录"，用户白折腾。
+//
+// realm 为空时回落国际服优先（与 qoderOpenAPIBaseList 默认行为一致）。
+func qoderOpenAPIBaseListForRealm(realm string) []string {
 	if v := strings.TrimSpace(os.Getenv("QODER_OPENAPI_BASE")); v != "" {
 		return []string{strings.TrimRight(v, "/")}
+	}
+	if strings.EqualFold(strings.TrimSpace(realm), QoderRealmCN) {
+		return []string{qoderOpenAPICN, qoderOpenAPIINTL}
 	}
 	return []string{qoderOpenAPIINTL, qoderOpenAPICN}
 }
 
-// qoderOpenAPIBaseListForScope 按账号归属的 scope 排 base 顺序：
-// global 账号先打国际服（openapi.qoder.sh），其余先打国内服。
+// qoderOpenAPIBaseList 按「显式 realm 优先、scope 推断兜底」排候选 base 顺序。
 //
-// 排错顺序的代价是实打出来的：global 账号先打国内服会拿到 401 TOKEN_EXPIRE
-// （"token is not active"），而它其实有**完全有效**的凭证 —— 401 极易被误读成
-// "token 失效"，面板于是显示"需要重新登录"，用户白折腾。
+// 这是签到/续期/usage 的统一入口：拿到账号 realm 就走 ForRealm（可靠），
+// 拿不到再退回 scope 含 ":global" 的旧推断（cn 账号也可能带 global scope，不如 realm 准）。
+// QODER_OPENAPI_BASE 可固定单一 base。
+func qoderOpenAPIBaseList(realm, scope string) []string {
+	if v := strings.TrimSpace(os.Getenv("QODER_OPENAPI_BASE")); v != "" {
+		return []string{strings.TrimRight(v, "/")}
+	}
+	if r := strings.TrimSpace(realm); r != "" {
+		return qoderOpenAPIBaseListForRealm(r)
+	}
+	return qoderOpenAPIBaseListForScope(scope)
+}
+
+// qoderOpenAPIBaseListForScope 按账号归属的 scope 排 base 顺序（兼容旧调用）：
+// scope 含 ":global" 的走国际服优先，否则国内服优先。
+//
+// ⚠️ 新代码请优先用 qoderOpenAPIBaseList(realm, scope)（显式 realm 优先）。
 func qoderOpenAPIBaseListForScope(scope string) []string {
 	if v := strings.TrimSpace(os.Getenv("QODER_OPENAPI_BASE")); v != "" {
 		return []string{strings.TrimRight(v, "/")}
@@ -644,7 +677,7 @@ func qoderCheckinAuth(auth *QoderAuth, dev *QoderDevice, scope string) (res *Qod
 		return &QoderCheckinResult{Phase: "login_required", Msg: "该账号没有可用凭证（token/refresh_token 均为空）"}, "", ""
 	}
 	res = &QoderCheckinResult{
-		Email: auth.User.Email,
+		Email: QoderAuthKey(auth),
 		Name:  auth.User.Name,
 		UID:   auth.User.ID,
 	}
@@ -666,7 +699,7 @@ func qoderCheckinAuth(auth *QoderAuth, dev *QoderDevice, scope string) (res *Qod
 	// 不是 401——以前循环在第一个 200 就 break，于是永远"暂无可领取活动"，
 	// 而且永远不会触发续期。表现就是：明明有活动，面板却一直签不了。
 	if qoderAuthExpired(auth) {
-		if nt, nrt, ok := qoderRefreshToken(auth, qoderOpenAPIBaseListForScope(scope)[0], dev); ok {
+		if nt, nrt, ok := qoderRefreshToken(auth, qoderOpenAPIBaseList(qoderAuthRealm(auth), scope)[0], dev); ok {
 			token = nt
 			res.Refreshed = true
 			newAccess, newRefresh = nt, nrt
@@ -676,7 +709,7 @@ func qoderCheckinAuth(auth *QoderAuth, dev *QoderDevice, scope string) (res *Qod
 
 	authorized := false
 	emptyOK := false // 拿到过滤 200 但没有活动：作为"确实没有活动"的兜底证据
-	for _, b := range qoderOpenAPIBaseListForScope(scope) {
+	for _, b := range qoderOpenAPIBaseList(qoderAuthRealm(auth), scope) {
 		st, rw, err := qoderDo(b, qoderPathCampaigns, http.MethodGet, token, nil, dev)
 		if err != nil {
 			lastErr = err.Error()
@@ -841,11 +874,11 @@ func qoderClaimInstance(auth *QoderAuth, dev *QoderDevice, cid, scope string) (p
 	}
 	token := auth.Token
 	if qoderAuthExpired(auth) {
-		if nt, _, ok := qoderRefreshToken(auth, qoderOpenAPIBaseListForScope(scope)[0], dev); ok {
+		if nt, _, ok := qoderRefreshToken(auth, qoderOpenAPIBaseList(qoderAuthRealm(auth), scope)[0], dev); ok {
 			token = nt
 		}
 	}
-	for _, b := range qoderOpenAPIBaseListForScope(scope) {
+	for _, b := range qoderOpenAPIBaseList(qoderAuthRealm(auth), scope) {
 		st, raw, err := qoderDo(b, fmt.Sprintf(qoderPathClaim, cid), http.MethodPost, token, []byte("{}"), dev)
 		if err != nil || st != http.StatusOK {
 			continue
@@ -929,7 +962,7 @@ type qoderScanOutcome struct {
 // qoderScanAuth 用指定登录态做一次「只查不领」的上游核实（多 base + 续期重试）。
 func qoderScanAuth(auth *QoderAuth, dev *QoderDevice, scope string) qoderScanOutcome {
 	out := qoderScanOutcome{result: &QoderCheckinResult{
-		Email: auth.User.Email, Name: auth.User.Name, UID: auth.User.ID,
+		Email: QoderAuthKey(auth), Name: auth.User.Name, UID: auth.User.ID,
 	}}
 	if auth == nil || (auth.Token == "" && auth.RefreshToken == "") {
 		out.result.Phase = "login_required"
@@ -944,7 +977,7 @@ func qoderScanAuth(auth *QoderAuth, dev *QoderDevice, scope string) qoderScanOut
 	token := auth.Token
 	// 过期先续期（别等 401：国际服对过期 token 返回 200 + 空列表）。
 	if qoderAuthExpired(auth) {
-		if nt, nrt, ok := qoderRefreshToken(auth, qoderOpenAPIBaseListForScope(scope)[0], dev); ok {
+		if nt, nrt, ok := qoderRefreshToken(auth, qoderOpenAPIBaseList(qoderAuthRealm(auth), scope)[0], dev); ok {
 			token = nt
 			out.result.Refreshed = true
 			out.newAccess, out.newRefresh = nt, nrt
@@ -959,7 +992,7 @@ func qoderScanAuth(auth *QoderAuth, dev *QoderDevice, scope string) qoderScanOut
 	// 每个 base 的失败原因都要留档：只留最后一个会把「国际服网络失败」显示成
 	// 「国内服 401 token 失效」，把用户引到完全错误的方向上。
 	var baseErrs []string
-	for _, b := range qoderOpenAPIBaseListForScope(scope) {
+	for _, b := range qoderOpenAPIBaseList(qoderAuthRealm(auth), scope) {
 		st, raw, err := qoderDo(b, qoderPathCampaigns, http.MethodGet, token, nil, dev)
 		if err != nil {
 			lastErr = err.Error()
@@ -1180,9 +1213,9 @@ func qoderUsageAuth(auth *QoderAuth, dev *QoderDevice, scope string) *QoderUsage
 	if dev == nil {
 		dev = &QoderDevice{}
 	}
-	res := &QoderUsageResult{Email: auth.User.Email, Name: auth.User.Name, UID: auth.User.ID}
+	res := &QoderUsageResult{Email: QoderAuthKey(auth), Name: auth.User.Name, UID: auth.User.ID}
 	lastErr := ""
-	for _, base := range qoderOpenAPIBaseListForScope(scope) {
+	for _, base := range qoderOpenAPIBaseList(qoderAuthRealm(auth), scope) {
 		st, raw, derr := qoderDo(base, qoderPathUsage, http.MethodGet, auth.Token, nil, dev)
 		if derr != nil {
 			lastErr = derr.Error()
@@ -1253,7 +1286,7 @@ func QoderRenew(force bool) *QoderRenewResult {
 	if err != nil {
 		return &QoderRenewResult{Phase: "login_required", Msg: "未登录或无法读取登录态"}
 	}
-	res := &QoderRenewResult{Email: auth.User.Email, Name: auth.User.Name}
+	res := &QoderRenewResult{Email: QoderAuthKey(auth), Name: auth.User.Name}
 	if !force {
 		if t, perr := time.Parse(time.RFC3339, auth.ExpiresAt); perr == nil && time.Now().Add(72*time.Hour).Before(t) {
 			res.Phase = "skipped"
@@ -1269,7 +1302,7 @@ func QoderRenew(force bool) *QoderRenewResult {
 	}
 	dev := qoderDeviceForAccount(auth)
 	lastErr := ""
-	for _, base := range qoderOpenAPIBaseListForScope(currentQoderScope()) {
+	for _, base := range qoderOpenAPIBaseList(qoderAuthRealm(auth), currentQoderScope()) {
 		at, rt, exp, rtexp, ok := qoderRefreshTokenFull(auth, base, dev)
 		if !ok {
 			lastErr = "刷新失败 @ " + base
@@ -1436,7 +1469,7 @@ func qoderSHA256(s string) []byte {
 func qoderDeviceForAccount(auth *QoderAuth) *QoderDevice {
 	email, uid := "", ""
 	if auth != nil {
-		email = auth.User.Email
+		email = QoderAuthKey(auth)
 		uid = auth.User.ID
 	}
 	if dev, err := QoderDeviceForAccount2(email, uid); err == nil && dev != nil {

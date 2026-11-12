@@ -23,9 +23,8 @@ import (
 
 	"github.com/linguo2625469/workbuddy2api-panel/internal/auth"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/httpauth"
-	"github.com/linguo2625469/workbuddy2api-panel/internal/ideauth"
-	"github.com/linguo2625469/workbuddy2api-panel/internal/minimax"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/livecfg"
+	"github.com/linguo2625469/workbuddy2api-panel/internal/minimax"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/pool"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/reqlog"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/scheduler"
@@ -174,11 +173,11 @@ func New(cfg Config) *Panel {
 		cfg.RedisMode = "noop"
 	}
 	p := &Panel{
-		cfg:     cfg,
-		mux:     http.NewServeMux(),
-		started: time.Now(),
-		logs:    NewRing(500),
-		logins:  map[string]loginSession{},
+		cfg:      cfg,
+		mux:      http.NewServeMux(),
+		started:  time.Now(),
+		logs:     NewRing(500),
+		logins:   map[string]loginSession{},
 		mmLogins: map[string]*minimax.DeviceSession{},
 	}
 	p.routes()
@@ -289,6 +288,9 @@ func (p *Panel) routes() {
 	p.mux.HandleFunc("GET /panel/api/ide/qoder/login/poll", p.withAuth(p.qoderLoginPoll))
 	p.mux.HandleFunc("POST /panel/api/ide/qoder/web/start", p.withAuth(p.qoderWebStart))
 	p.mux.HandleFunc("GET /panel/api/ide/qoder/web/poll", p.withAuth(p.qoderWebPoll))
+	// 浏览器授权登录（OAuth 设备流）：不依赖 DPAPI/本机浏览器，容器部署可用。
+	p.mux.HandleFunc("POST /panel/api/ide/qoder/devlogin/start", p.withAuth(p.qoderDevLoginStart))
+	p.mux.HandleFunc("GET /panel/api/ide/qoder/devlogin/poll", p.withAuth(p.qoderDevLoginPoll))
 	p.mux.HandleFunc("POST /panel/api/ide/doubao/remove", p.withAuth(p.doubaoRemove))
 	p.mux.HandleFunc("POST /panel/api/ide/doubao/checkin", p.withAuth(p.doubaoCheckin))
 
@@ -501,9 +503,10 @@ func (p *Panel) models(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Qoder 域：本机 Qoder 已登录时，追加 Qoder 官方模型目录（静态口径，见 qoderModelEntries）。
-	if snap, err := ideauth.CaptureQoderSnapshot(); err == nil && snap != nil && snap.Email != "" {
-		out = append(out, qoderModelEntries()...)
+	// Qoder 域：按号池账号的 realm 挂对应官方目录（静态嵌入，不打上游、
+	// 不依赖 DPAPI，容器部署可用）；号池为空时回落本机客户端探测。
+	for _, realm := range qoderCatalogRealms() {
+		out = append(out, qoderModelEntriesForRealm(realm)...)
 	}
 
 	// MiniMax Code 域：客户端已登录时追加其模型目录（动态拉取，失败则不列）。
@@ -534,55 +537,6 @@ func (p *Panel) models(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "models": out})
-}
-
-// qoderModelEntries 返回 Qoder 域的模型目录（静态口径，来源 docs.qoder.com/zh/cli/model）。
-// Qoder 客户端不暴露公开模型目录接口，故按官方文档内置；倍率即文档里的 price_factor。
-func qoderModelEntries() []map[string]any {
-	type qm struct {
-		id, name, credits, def, vendor, desc string
-		efforts                              []string
-		ctx                                  int
-		canDisable, reasoning                bool
-	}
-	list := []qm{
-		{"Qwen3.8-Max", "Qwen3.8-Max", "0.5×", "medium", "阿里云", "千问最新旗舰，2.4T 参数，支持推理/多模态/思考开关，200K-1M 上下文", []string{"low", "medium", "xhigh"}, 1000000, true, true},
-		{"Qwen3.7-Max", "Qwen3.7-Max", "0.5×", "medium", "阿里云", "智能体能力大幅跃升，可自主处理长程复杂任务，支持多模态/思考开关", []string{"low", "medium", "high"}, 1000000, true, true},
-		{"Qwen3.7-Plus", "Qwen3.7-Plus", "0.1×", "medium", "阿里云", "推理能力、效率与多模态体验全面提升，高性价比", []string{"low", "medium", "high"}, 1000000, true, true},
-		{"Kimi-K3", "Kimi-K3", "0.8×", "high", "月之暗面", "2.8T 参数，面向软件工程/知识工作/深度推理，支持多模态", []string{"low", "high", "max"}, 1000000, false, true},
-		{"Kimi-K2.7-Code", "Kimi-K2.7-Code", "0.3×", "high", "月之暗面", "面向长上下文编码，256K 上下文，提供 Fast 模式", nil, 256000, false, false},
-		{"GLM-5.3", "GLM-5.3", "0.6×", "high", "智谱", "擅长复杂系统工程与长程任务，支持推理/多模态", []string{"low", "high", "max"}, 1000000, false, true},
-		{"GLM-5.2", "GLM-5.2", "0.6×", "high", "智谱", "擅长复杂系统工程与长程任务，支持思考开关", []string{"high", "max"}, 1000000, true, true},
-		{"DeepSeek-V4-Pro", "DeepSeek-V4-Pro", "0.8×", "high", "深度求索", "擅长复杂推理、代码生成与工程任务，支持思考开关", []string{"high", "max"}, 1000000, true, true},
-		{"DeepSeek-V4-Flash", "DeepSeek-V4-Flash", "0.3×", "high", "深度求索", "快速推理、低成本、能力均衡，支持思考开关", []string{"low", "high", "max"}, 1000000, true, true},
-		{"MiniMax-M3", "MiniMax-M3", "0.2×", "medium", "MiniMax", "原生多模态感知与前沿编码能力，1M 上下文", nil, 1000000, false, false},
-		{"Auto", "Auto（智能路由）", "1.0×", "", "Qoder", "自动选择最适合当前任务的模型，平衡性能与成本", nil, 1000000, false, false},
-		{"Ultimate", "Ultimate（专家级）", "1.6×", "", "Qoder", "专家级深度推理与思考能力，适合复杂系统设计", nil, 1000000, false, false},
-		{"Performance", "Performance（高性能）", "1.1×", "", "Qoder", "高级推理与高质量输出，适合核心功能实现/重构", nil, 1000000, false, false},
-		{"Efficient", "Efficient（高性价比）", "0.3×", "", "Qoder", "标准推理、低成本，适合基础代码生成与日常问答", nil, 1000000, false, false},
-	}
-	out := make([]map[string]any, 0, len(list))
-	for _, m := range list {
-		e := map[string]any{
-			"id":                   "qoder:" + m.id,
-			"name":                 m.name,
-			"credits":              m.credits,
-			"vendor":               m.vendor,
-			"description":          m.desc,
-			"context_length":       m.ctx,
-			"supported_efforts":    m.efforts,
-			"can_disable_thinking": m.canDisable,
-			"supports_reasoning":   m.reasoning,
-			"supports_images":      true,
-			"supports_tool_call":   true,
-			"tags":                 []string{"qoder"},
-		}
-		if m.def != "" {
-			e["default_effort"] = m.def
-		}
-		out = append(out, e)
-	}
-	return out
 }
 
 // panelModelEntry 构造单个模型条目（两域共用）：id 带 realm 前缀（调用值即显示值），

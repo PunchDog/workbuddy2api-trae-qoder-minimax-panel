@@ -251,7 +251,11 @@ func (h *Handler) traeModels() []map[string]any {
 	if h.cfg.Trae == nil || h.cfg.TraeCatalog == nil {
 		return nil
 	}
-	models, err := h.cfg.TraeCatalog.Models(h.baseCtx())
+	// 目录拉取必须有界：baseCtx 无 deadline，Trae 号全不可用时 Acquire 会无限等，
+	// 把 /v1/models 整个挂死（客户端启动拉模型列表即超时）。10s 上限保住列表可用性。
+	ctx, cancel := context.WithTimeout(h.baseCtx(), 10*time.Second)
+	defer cancel()
+	models, err := h.cfg.TraeCatalog.Models(ctx)
 	if err != nil || len(models) == 0 {
 		return nil
 	}

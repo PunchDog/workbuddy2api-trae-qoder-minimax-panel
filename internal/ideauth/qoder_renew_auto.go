@@ -35,7 +35,7 @@ func QoderRenewSnapshotAuth(snap *QoderSnapshot) (renewed bool, expiresAt string
 		scope = currentQoderScope()
 	}
 	lastErr := ""
-	for _, base := range qoderOpenAPIBaseListForScope(scope) {
+	for _, base := range qoderOpenAPIBaseList(snap.Realm, scope) {
 		at, rt, exp, rtexp, ok := qoderRefreshTokenFull(auth, base, dev)
 		if !ok {
 			lastErr = "刷新失败 @ " + base

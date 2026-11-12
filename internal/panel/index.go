@@ -9,7 +9,10 @@
 package panel
 
 import (
+	"bytes"
+	"crypto/sha256"
 	_ "embed"
+	"fmt"
 	"net/http"
 )
 
@@ -18,6 +21,20 @@ var indexHTML []byte
 
 //go:embed app.js
 var appJS []byte
+
+// 构建指纹治理「改了没生效」：
+//   - jsBuild 取原始 app.js 的内容哈希，注入 index.html 的 script ?v= 与
+//     app.js 自身的 PANEL_BUILD 常量——重新加载页面必拿新 JS（绕开任何
+//     不守 no-cache 的中间层）；
+//   - 响应带 ETag，配合 no-cache 做 304 回源校验（省带宽且语义正确）；
+//   - 旧标签页（SPA 内存里仍是旧 JS）由 app.js 轮询 app.js 的 ETag 发现
+//     失配后弹刷新条，不再静默跑旧界面。
+var (
+	jsBuild     = fmt.Sprintf("%x", sha256.Sum256(appJS))[:12]
+	servedJS    = bytes.ReplaceAll(appJS, []byte("__JS_BUILD__"), []byte(jsBuild))
+	servedIndex = bytes.ReplaceAll(indexHTML, []byte("__JS_BUILD__"), []byte(jsBuild))
+	htmlBuild   = fmt.Sprintf("%x", sha256.Sum256(servedIndex))[:12]
+)
 
 // csp 内容安全策略（严格版，无需 unsafe-inline）：
 //   - default-src 'none'        默认全禁，逐个开口
@@ -50,17 +67,28 @@ func (p *Panel) index(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	// 面板是**嵌入式本地服务**：升级二进制后必须立刻拿到新的 HTML/JS，
 	// 否则浏览器会用启发式缓存继续跑**旧版 app.js**（界面与后端对不上，
-	// 表现为"改了没生效"）。no-cache = 每次都回源校验。
+	// 表现为"改了没生效"）。no-cache = 每次都回源校验（ETag 命中回 304）。
 	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("ETag", `"`+htmlBuild+`"`)
+	if r.Header.Get("If-None-Match") == `"`+htmlBuild+`"` {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(indexHTML)
+	_, _ = w.Write(servedIndex)
 }
 
 // appScript 输出前端逻辑（同源脚本，供 CSP script-src 'self' 加载）。
+// ETag 即构建指纹：旧标签页轮询它发现自己过期（见 app.js PANEL_BUILD）。
 func (p *Panel) appScript(w http.ResponseWriter, r *http.Request) {
 	setSecurityHeaders(w)
 	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("ETag", `"`+jsBuild+`"`)
+	if r.Header.Get("If-None-Match") == `"`+jsBuild+`"` {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(appJS)
+	_, _ = w.Write(servedJS)
 }

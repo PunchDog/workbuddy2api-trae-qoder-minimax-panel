@@ -2,6 +2,8 @@
 # go.mod 要求 go 1.26.0，基础镜像必须跟上（用 1.23 会直接报 "go.mod requires go >= 1.26.0"）
 FROM golang:1.26-alpine AS build
 WORKDIR /src
+# 使用国内代理加速模块下载，避免访问 proxy.golang.org 超时
+ENV GOPROXY=https://goproxy.cn,direct
 COPY go.mod ./
 RUN go mod download
 COPY . .

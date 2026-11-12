@@ -45,11 +45,23 @@ import (
 	"github.com/linguo2625469/workbuddy2api-panel/internal/ideauth"
 )
 
-// qoderWebOrigin Qoder 网页控制台。
-const qoderWebOrigin = "https://qoder.com"
+// qoderWebOriginForRealm Qoder 网页控制台按 realm 切域名：
+// cn → qoder.com.cn，intl（含空/未知）→ qoder.com。
+func qoderWebOriginForRealm(realm string) string {
+	if strings.EqualFold(strings.TrimSpace(realm), ideauth.QoderRealmCN) {
+		return "https://qoder.com.cn"
+	}
+	return "https://qoder.com"
+}
 
-// qoderWebAPI Qoder 开放接口（成长页就是它）。
-const qoderWebAPI = "https://openapi.qoder.sh"
+// qoderWebAPIForRealm Qoder 开放接口按 realm 切域名（成长页就是它）：
+// cn → openapi.qoder.com.cn，intl（含空/未知）→ openapi.qoder.sh。
+func qoderWebAPIForRealm(realm string) string {
+	if strings.EqualFold(strings.TrimSpace(realm), ideauth.QoderRealmCN) {
+		return "https://openapi.qoder.com.cn"
+	}
+	return "https://openapi.qoder.sh"
+}
 
 const qoderWebTTL = 30 * time.Minute
 
@@ -61,6 +73,7 @@ var qoderWebSessions = struct {
 
 type qoderWebState struct {
 	email     string
+	realm     string // 本次会话的客户端版本（cn/intl）：新账号还没入号池，不能靠邮箱查
 	port      int
 	dir       string
 	proc      *exec.Cmd
@@ -91,15 +104,22 @@ func shortHash(s string) string {
 }
 
 // qoderWebStart 拉起浏览器（该账号的独立 profile）并打开 Qoder 网页控制台。
+// body: {"email":"...","realm":"cn|intl"} —— realm 缺省时按号池查，查不到回落国际版。
 func (p *Panel) qoderWebStart(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email string `json:"email"`
+		Realm string `json:"realm"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	email := strings.TrimSpace(req.Email)
 	if email == "" {
 		writeErr(w, http.StatusBadRequest, "email_required")
 		return
+	}
+	// 版本优先用前端显式传的（添加弹窗里选的）；没传才按号池查。
+	realm := strings.TrimSpace(req.Realm)
+	if realm != ideauth.QoderRealmCN && realm != ideauth.QoderRealmINTL {
+		realm = qoderWebRealmForEmail(email)
 	}
 
 	qoderWebSessions.mu.Lock()
@@ -135,7 +155,8 @@ func (p *Panel) qoderWebStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 配置了出口代理的账号：登录环境与签到请求走同一个代理（否则"隔离"只隔离了一半）。
-	args := ideauth.QoderWebChromeArgs(port, dir, egress.ProxyURL, qoderWebOrigin+"/account/usage")
+	// 网页控制台域名按本次会话的 realm 切：国内版 qoder.com.cn，国际版 qoder.com。
+	args := ideauth.QoderWebChromeArgs(port, dir, egress.ProxyURL, qoderWebOriginForRealm(realm)+"/account/usage")
 	cmd := exec.Command(chrome, args...)
 	if err := cmd.Start(); err != nil {
 		qoderWebSessions.mu.Unlock()
@@ -143,14 +164,14 @@ func (p *Panel) qoderWebStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	qoderWebSessions.by[email] = &qoderWebState{
-		email: email, port: port, dir: dir, proc: cmd, startedAt: time.Now(),
+		email: email, realm: realm, port: port, dir: dir, proc: cmd, startedAt: time.Now(),
 	}
 	qoderWebSessions.mu.Unlock()
-	log.Printf("panel: Qoder 网页登录：%s（调试端口 %d，profile %s，代理 %s）",
-		email, port, dir, firstNonEmpty(egress.ProxyURL, "进程默认"))
+	log.Printf("panel: Qoder 网页登录：%s（realm=%s，调试端口 %d，profile %s，代理 %s）",
+		email, realm, port, dir, firstNonEmpty(egress.ProxyURL, "进程默认"))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "running": true,
-		"message": "已打开浏览器（这个账号的独立会话），请登录要添加的 Qoder 账号 —— 登录一次即可，以后每天由面板自动签到",
+		"message": "已打开浏览器（" + qoderRealmLabel(realm) + "，这个账号的独立会话），请登录要添加的 Qoder 账号 —— 登录一次即可，以后每天由面板自动签到",
 	})
 }
 
@@ -182,6 +203,7 @@ func (p *Panel) qoderWebPoll(w http.ResponseWriter, r *http.Request) {
 	}
 	port := st.port
 	dir := st.dir
+	realm := st.realm
 	qoderWebSessions.mu.Unlock()
 
 	all, err := cdpAllCookies(port)
@@ -195,8 +217,13 @@ func (p *Panel) qoderWebPoll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 按本次会话的 realm 决定打哪套 openapi：国内版账号走 openapi.qoder.com.cn，
+	// 国际版走 openapi.qoder.sh。realm 在 start 时就定好（新账号还没入号池，
+	// 按邮箱查会查不到而误落国际版）。排错域名会拿到 401/404，被误读成"登录失效"。
+	apiBase := qoderWebAPIForRealm(realm)
+
 	// 用网页会话复现网页端自己的请求：先查活动列表。
-	status, body, err := qoderWebGet(jar, "/sash/api/v1/me/campaigns")
+	status, body, err := qoderWebGet(jar, apiBase, "/sash/api/v1/me/campaigns")
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"done": false, "message": "等待浏览器就绪…"})
 		return
@@ -253,7 +280,7 @@ func (p *Panel) qoderWebPoll(w http.ResponseWriter, r *http.Request) {
 	ok := false
 	switch {
 	case claimID != "":
-		st2, b2, cerr := qoderWebPost(jar, "/sash/api/v1/me/campaigns/"+claimID+"/claim")
+		st2, b2, cerr := qoderWebPost(jar, apiBase, "/sash/api/v1/me/campaigns/"+claimID+"/claim")
 		if cerr == nil && st2 == http.StatusOK {
 			var r struct {
 				Status      string `json:"status"`
@@ -373,23 +400,41 @@ func qoderCookieJar(all []cdpCookie) (*cookiejar.Jar, []string) {
 	return jar, doms
 }
 
+// qoderWebRealmForEmail 按邮箱查号池快照的 realm；查不到回落国际版。
+// 网页签到/网页登录的域名切换都靠它——同一台机器上可能同时有国内/国际版账号。
+func qoderWebRealmForEmail(email string) string {
+	all, err := ideauth.LoadQoderPool()
+	if err == nil {
+		for _, a := range all.Accounts {
+			if strings.EqualFold(strings.TrimSpace(a.Email), strings.TrimSpace(email)) {
+				if a.Realm == ideauth.QoderRealmCN {
+					return ideauth.QoderRealmCN
+				}
+				break
+			}
+		}
+	}
+	return ideauth.QoderRealmINTL
+}
+
 // qoderWebGet / qoderWebPost 用网页会话调 openapi（CookieJar 自动按域挑 cookie）。
-func qoderWebGet(jar *cookiejar.Jar, path string) (int, []byte, error) {
-	return qoderWebDo(jar, http.MethodGet, path, nil)
+// base 由调用方按账号 realm 决定（国际版 openapi.qoder.sh / 国内版 openapi.qoder.com.cn）。
+func qoderWebGet(jar *cookiejar.Jar, baseURL, path string) (int, []byte, error) {
+	return qoderWebDo(jar, baseURL, http.MethodGet, path, nil)
 }
 
-func qoderWebPost(jar *cookiejar.Jar, path string) (int, []byte, error) {
-	return qoderWebDo(jar, http.MethodPost, path, []byte("{}"))
+func qoderWebPost(jar *cookiejar.Jar, baseURL, path string) (int, []byte, error) {
+	return qoderWebDo(jar, baseURL, http.MethodPost, path, []byte("{}"))
 }
 
-func qoderWebDo(jar *cookiejar.Jar, method, path string, body []byte) (int, []byte, error) {
+func qoderWebDo(jar *cookiejar.Jar, baseURL, method, path string, body []byte) (int, []byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	var rdr io.Reader
 	if len(body) > 0 {
 		rdr = strings.NewReader(string(body))
 	}
-	req, err := http.NewRequestWithContext(ctx, method, qoderWebAPI+path, rdr)
+	req, err := http.NewRequestWithContext(ctx, method, baseURL+path, rdr)
 	if err != nil {
 		return 0, nil, err
 	}

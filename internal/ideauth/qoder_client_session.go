@@ -30,7 +30,7 @@ func QoderClientAuthFor(email string) *QoderAuth {
 	if err != nil || a == nil {
 		return nil
 	}
-	if !strings.EqualFold(strings.TrimSpace(a.User.Email), email) {
+	if !strings.EqualFold(QoderAuthKey(a), email) {
 		return nil
 	}
 	if strings.TrimSpace(a.Token) == "" {

@@ -939,7 +939,7 @@ func qoderPoolItems(pool *QoderPoolFile, emails []string) []qoderPoolItem {
 		}
 		email := strings.TrimSpace(snap.Email)
 		if email == "" {
-			email = snap.Auth.User.Email
+			email = QoderAuthKey(snap.Auth)
 		}
 		if email == "" {
 			continue
@@ -1554,7 +1554,7 @@ func QoderPoolStatuses() []map[string]any {
 		}
 		email := strings.TrimSpace(snap.Email)
 		if email == "" && snap.Auth != nil {
-			email = snap.Auth.User.Email
+			email = QoderAuthKey(snap.Auth)
 		}
 		if email == "" {
 			continue
@@ -1698,7 +1698,7 @@ func QoderPoolScan(emails []string) []QoderScanAccount {
 		}
 		email := strings.TrimSpace(snap.Email)
 		if email == "" && snap.Auth != nil {
-			email = strings.TrimSpace(snap.Auth.User.Email)
+			email = strings.TrimSpace(QoderAuthKey(snap.Auth))
 		}
 		if email == "" {
 			continue
@@ -1725,7 +1725,7 @@ func QoderPoolScan(emails []string) []QoderScanAccount {
 		}
 		email := strings.TrimSpace(snap.Email)
 		if email == "" {
-			email = snap.Auth.User.Email
+			email = QoderAuthKey(snap.Auth)
 		}
 		if len(want) > 0 && !want[normalizeQoderEmail(email)] {
 			continue
@@ -1747,7 +1747,7 @@ func QoderPoolScan(emails []string) []QoderScanAccount {
 			snap := j.snap
 			email := strings.TrimSpace(snap.Email)
 			if email == "" {
-				email = snap.Auth.User.Email
+				email = QoderAuthKey(snap.Auth)
 			}
 			key := normalizeQoderEmail(email)
 			row := QoderScanAccount{
@@ -1947,7 +1947,7 @@ func QoderPoolScan(emails []string) []QoderScanAccount {
 		//   只有服务端明确回 BLOCKED/SAME_PERSON_ALREADY_CLAIMED（本号被拒），
 		//   才是「额度是同人的另一个号领的」，这时才降级。
 		if r.Phase == QoderPhaseClaimed {
-			probe := qoderProbeReward(myAuth, QoderDeviceInfo(), r.ClaimCID, r.Scope)
+			probe := qoderProbeReward(myAuth, qoderDeviceForAuth(myAuth), r.ClaimCID, r.Scope)
 			switch {
 			case strings.EqualFold(probe.Status, "BLOCKED") &&
 				strings.Contains(strings.ToUpper(probe.FailureCode), "SAME_PERSON"):
@@ -1989,8 +1989,8 @@ func QoderPoolScan(emails []string) []QoderScanAccount {
 			if ownerAuth == nil {
 				continue
 			}
-			ownerProbe := qoderProbeReward(myAuth, QoderDeviceInfo(), cid, r.Scope)
-			holderProbe := qoderProbeReward(ownerAuth, QoderDeviceInfo(), cid, r.Scope)
+			ownerProbe := qoderProbeReward(myAuth, qoderDeviceForAuth(myAuth), cid, r.Scope)
+			holderProbe := qoderProbeReward(ownerAuth, qoderDeviceForAuth(ownerAuth), cid, r.Scope)
 			switch qoderPersonVerdict(ownerProbe, holderProbe) {
 			case QoderVerdictSamePerson:
 				r.DeviceQuotaUsed = true
@@ -2120,7 +2120,7 @@ func QoderUsageFor(email string) *QoderUsageResult {
 		if snap == nil || snap.Auth == nil {
 			continue
 		}
-		if strings.EqualFold(snap.Email, email) || strings.EqualFold(snap.Auth.User.Email, email) {
+		if strings.EqualFold(snap.Email, email) || strings.EqualFold(QoderAuthKey(snap.Auth), email) {
 			auth := cloneQoderAuth(snap.Auth)
 			env := qoderRuntimeEnvOrDefault(qoderSnapshotRuntimeEnv(snap))
 			dev, _ := qoderDeviceForEmailSafeEnv(snap.Email, qoderSnapshotUID(snap), env)

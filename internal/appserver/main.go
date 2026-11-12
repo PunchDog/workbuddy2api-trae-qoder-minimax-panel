@@ -37,21 +37,21 @@ import (
 // appVersion 网关版本（fork 版：面板 + 任务体系），透出到 /panel/api/overview。
 //
 // 1.15.8-panel：把 Qoder「额度归属」的结论改成**只说有证据的话** ——
-//  1) 面板上「策略：服务端判定同人」是**默认值**，不是实测结论：旧实现对
+//  1. 面板上「策略：服务端判定同人」是**默认值**，不是实测结论：旧实现对
 //     claimed/already/claimable 一律回 shared_person，于是每个号都挂着这句。
 //     但 2026-11-04 实测：服务端**从没判过**这两个号同人 —— 两号看到同一条
 //     campaign，grantId / claimedAt 各不相同，各自 +100（额度余额也各自独立：
 //     1700 / 900）。现在只有拿到**本号自己的 grantId** 才叫 isolated，只有服务端
 //     明确回 SAME_PERSON_ALREADY_CLAIMED（或额度归属另有其人）才叫 shared_person，
 //     其余一律 unknown（归属未核实）—— 不再拿没证据的结论当事实说。
-//  2) POST 侧补上「already」的**只读归属探测**（GET .../campaigns/{cid}/reward）：
+//  2. POST 侧补上「already」的**只读归属探测**（GET .../campaigns/{cid}/reward）：
 //     上游对同一人组的所有号返回同一条已领活动，「already」不等于「本号领过」。
 //     不问就会出现「同一个号两个说法」（POST 说未核实、扫描说独立）和「+100 虚记」。
-//  3) 面板文案同步：不再笼统说「服务端按人发，同一人一天只有一份」—— 那只在
+//  3. 面板文案同步：不再笼统说「服务端按人发，同一人一天只有一份」—— 那只在
 //     服务端判同人时成立。
 //
 // 1.15.7-panel：修用户实测报出的两个真问题 ——
-//  1) 华为云登录窗口「我登录了但还提示未登录、提取不到」：根因是登录判定
+//  1. 华为云登录窗口「我登录了但还提示未登录、提取不到」：根因是登录判定
 //     **只看页面文案**。实测现场：浏览器里已有完整登录凭据（domain_tag /
 //     user_tag / hwid_cas_sid / SSOTGC），authui 的 /authui/isLogin 也回
 //     success，但扫码后的 CAS ticket 回跳（302 → redirect_url）失败，页面
@@ -62,7 +62,7 @@ import (
 //     ③ 授权成功但没回跳时，面板**代为跳转** redirect_url 并复验会话；
 //     ④ 二维码失效时明确提示「点刷新重新出码」（实测扫的是过期码，
 //     服务端 status 一直是 new，从未扫成功）。
-//  2) Qoder 面板「两个号都显示 +100 / 上下重复」：
+//  2. Qoder 面板「两个号都显示 +100 / 上下重复」：
 //     ① 虚记 —— 服务端按**人**发额度，后打的号回 already 但拿到的是**同一个
 //     campaign 实例**，那 100 积分只进了先打那个号的账。旧实现 already 也记
 //     credits=100，两个号相加凭空多出 100。现在按 campaign 实例回填归属，
@@ -71,15 +71,15 @@ import (
 //     一遍。现在该块只画汇总（分桶计数 / 实际入账 / 额度组 / 本轮顺序）。
 //
 // 1.15.6-panel：修三个实测出来的真问题 ——
-//  1) 华为云 CodeArts 续期被**陈旧结论永久锁死**：renew_result=needs_login 是
+//  1. 华为云 CodeArts 续期被**陈旧结论永久锁死**：renew_result=needs_login 是
 //     「上一次尝试的结论」却被当成账号的固有属性，于是用户明明重新登录成功了，
 //     面板还是显示"只能重新登录"，手动「立即续期」386ms 就甩一句 needs_login
 //     （什么都没做）。现在：重新登录后旧结论作废；force 会真的发起一次尝试；
 //     判定结论不再伪装成"刚刚试过"（不再写 RenewAttemptAt）。
-//  2) Qoder 每日活动**不是 10:00 准时下发**，但"上游还没下发"这一状态此前
+//  2. Qoder 每日活动**不是 10:00 准时下发**，但"上游还没下发"这一状态此前
 //     **完全静默**（日志里一条都没有），用户只能得出"签不了"的结论。
 //     现在 pending 也要留痕，并把重试节奏在活动窗口内加密到 5 分钟。
-//  3) 面板进页"加载很久"：首屏三条渲染链各自独立请求同一批慢接口，
+//  3. 面板进页"加载很久"：首屏三条渲染链各自独立请求同一批慢接口，
 //     qoder/usage 被并发打 4 次、workbuddy/usage 3 次，最慢的 checkin-status
 //     2.6s 卡住首屏。现在前端合并在途请求，服务端加 15s 短 TTL 缓存。
 //
@@ -153,6 +153,17 @@ func Run() {
 		if err != nil {
 			log.Fatalf("load config: %v", err)
 		}
+	}
+
+	// api_key 未填写 → 自动生成 sk- 密钥并写回 config.json（保留未知键），
+	// 网关与面板调用一律用它鉴权；写回失败（只读挂载等）用内存 key 继续启动。
+	if key, kerr := EnsureAPIKey(cfg, *cfgPath); kerr != nil {
+		log.Printf("api_key 已自动生成但写回 config 失败（本次运行用内存密钥）: %v", kerr)
+		if key != "" {
+			log.Printf("api_key=%s（调用网关/面板需带此密钥）", key)
+		}
+	} else if key != "" {
+		log.Printf("api_key 未填写，已自动生成并写入 %s：%s（调用网关/面板需带此密钥）", *cfgPath, key)
 	}
 
 	// MiniMax Code 通道（minimax: 前缀）：登录态来自客户端 ~/.minimax/auth，
@@ -618,43 +629,23 @@ func saveConfig(raw []byte, path string, live *livecfg.Holder, p *pool.Pool, up 
 	if err != nil {
 		return nil, err
 	}
+	// 与启动同口径：api_key 留空自动生成 sk- 密钥，不留「不鉴权」空档。
+	if strings.TrimSpace(newCfg.APIKey) == "" {
+		key, gerr := GenerateAPIKey()
+		if gerr != nil {
+			return nil, gerr
+		}
+		newCfg.APIKey = key
+		merged["api_key"] = key
+	}
 
-	// 3) 落盘（原子替换）。
+	// 3) 落盘（原子替换；Docker 单文件 bind mount 的 EBUSY 回退在 writeConfigAtomic 内）。
 	out, err := json.MarshalIndent(merged, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("marshal config: %w", err)
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, out, 0o600); err != nil {
-		return nil, fmt.Errorf("write config: %w", err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		// A single-file Docker bind mount cannot be renamed over its mount
-		// target (Linux returns EBUSY / "device or resource busy"). Keep the
-		// atomic path for regular files, but update the mounted file in place
-		// for this specific deployment shape.
-		if !errors.Is(err, syscall.EBUSY) {
-			return nil, fmt.Errorf("replace config: %w", err)
-		}
-		f, openErr := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0o600)
-		if openErr != nil {
-			_ = os.Remove(tmp)
-			return nil, fmt.Errorf("replace config (bind mount fallback): %w", openErr)
-		}
-		_, writeErr := f.Write(out)
-		if writeErr == nil {
-			writeErr = f.Sync()
-		}
-		closeErr := f.Close()
-		// 写失败时保留 tmp（挂载文件已被 O_TRUNC 破坏，tmp 里是完整新内容，
-		// 可手工恢复）；写成功才清理。
-		if writeErr != nil {
-			return nil, fmt.Errorf("replace config (bind mount fallback, 完整新内容保留在 %s): %w", tmp, writeErr)
-		}
-		_ = os.Remove(tmp)
-		if closeErr != nil {
-			return nil, fmt.Errorf("replace config (bind mount fallback): %w", closeErr)
-		}
+	if err := writeConfigAtomic(path, out); err != nil {
+		return nil, err
 	}
 
 	// 4) 热应用：能立即生效的字段全部应用，并列出仍需重启的字段。

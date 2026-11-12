@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
@@ -90,7 +91,10 @@ func DPAPIUnprotect(data []byte) ([]byte, error) {
 
 // ---------- Qoder 目录与 OSCrypt key ----------
 
-// QoderDataDir 返回 Qoder 用户数据目录（Windows: %APPDATA%\com.qoder.app.stable）。
+// QoderDataDir 返回 Qoder 用户数据目录。
+// 优先级：环境变量 QODER_DATA_DIR > %APPDATA% 下自动探测 > 默认国际版目录。
+// 自动探测策略：国际版 com.qoder.app.stable 与国内版 com.qodercn.app.stable
+// 都存在时，取 auth.v1.dat 修改时间较新者（用户当前活跃的客户端）。
 func QoderDataDir() string {
 	if v := os.Getenv("QODER_DATA_DIR"); v != "" {
 		return v
@@ -100,13 +104,82 @@ func QoderDataDir() string {
 		home, _ := os.UserHomeDir()
 		appdata = filepath.Join(home, "AppData", "Roaming")
 	}
-	return filepath.Join(appdata, "com.qoder.app.stable")
+	return filepath.Join(appdata, qoderDetectAppDir(appdata))
+}
+
+// QoderDataDirForRealm 返回指定 realm 的 Qoder 数据目录（不自动探测）。
+// cn → com.qodercn.app.stable，intl → com.qoder.app.stable。
+func QoderDataDirForRealm(realm string) string {
+	if v := os.Getenv("QODER_DATA_DIR"); v != "" {
+		return v
+	}
+	appdata := os.Getenv("APPDATA")
+	if appdata == "" {
+		home, _ := os.UserHomeDir()
+		appdata = filepath.Join(home, "AppData", "Roaming")
+	}
+	dir := qoderAppDirIntl
+	if realm == QoderRealmCN {
+		dir = qoderAppDirCN
+	}
+	return filepath.Join(appdata, dir)
+}
+
+// qoderAppDirIntl / qoderAppDirCN 桌面客户端的 AppData 目录名。
+const (
+	qoderAppDirIntl = "com.qoder.app.stable"
+	qoderAppDirCN   = "com.qodercn.app.stable"
+)
+
+// qoderDetectAppDir 在 appdata 根目录下探测真实的 Qoder 客户端目录。
+// 两个都在时取 auth.v1.dat 修改时间较新的一方；只有一个存在时返回那个；
+// 都不存在时回落国际版（保持与旧版本一致的行为）。
+func qoderDetectAppDir(appdata string) string {
+	intlDir := filepath.Join(appdata, qoderAppDirIntl)
+	cnDir := filepath.Join(appdata, qoderAppDirCN)
+	intlOK := dirExists(intlDir)
+	cnOK := dirExists(cnDir)
+	switch {
+	case intlOK && cnOK:
+		intlM, _ := authFileModTime(intlDir)
+		cnM, _ := authFileModTime(cnDir)
+		if cnM.After(intlM) {
+			return qoderAppDirCN
+		}
+		return qoderAppDirIntl
+	case cnOK:
+		return qoderAppDirCN
+	default:
+		return qoderAppDirIntl
+	}
+}
+
+// dirExists 判断路径是否为已存在目录。
+func dirExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && st.IsDir()
+}
+
+// authFileModTime 返回目录下 auth.v1.dat 的修改时间；文件不存在返回零值 + false。
+func authFileModTime(dir string) (time.Time, bool) {
+	st, err := os.Stat(filepath.Join(dir, qoderAuthFile))
+	if err != nil {
+		return time.Time{}, false
+	}
+	return st.ModTime(), true
 }
 
 // QoderOSCryptKey 读取 Local State 里的 encrypted_key，经 DPAPI 解出
-// 32 字节 OSCrypt key（用于加解密 auth*.dat）。
+// 32 字节 OSCrypt key（用于加解密 auth*.dat）。默认读自动探测到的客户端目录。
 func QoderOSCryptKey() ([]byte, error) {
-	lsPath := filepath.Join(QoderDataDir(), "Local State")
+	return qoderOSCryptKeyInDir(QoderDataDir())
+}
+
+// qoderOSCryptKeyInDir 读取指定客户端目录的 OSCrypt key。
+// 国内/国际版各有自己的 Local State，key 不通用 —— 按 realm 收录账号时
+// 必须取对应目录的 key，否则解密 auth.v1.dat 必然失败。
+func qoderOSCryptKeyInDir(dir string) ([]byte, error) {
+	lsPath := filepath.Join(dir, "Local State")
 	raw, err := os.ReadFile(lsPath)
 	if err != nil {
 		return nil, fmt.Errorf("读取 Local State 失败: %w", err)

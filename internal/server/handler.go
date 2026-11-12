@@ -486,6 +486,8 @@ func (h *Handler) modelList() []map[string]any {
 	out = append(out, h.minimaxModels()...)
 	// MiniMax 开放平台模型名单（前缀 "mm:"）。
 	out = append(out, h.mmModels()...)
+	// Qoder 双区模型名单（前缀 "qoder-cn:"/"qoder-intl:"），有账号才列。
+	out = append(out, h.qoderModels()...)
 	return out
 }
 
@@ -625,6 +627,11 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	// MiniMax 通道分流：模型名带 "minimax:" 前缀 → Anthropic 协议转换后转发。
 	if realm == "minimax" {
 		h.minimaxChat(w, r, body, bareModel, st)
+		return
+	}
+	// Qoder 通道分流：qoder-cn:/qoder-intl: 钉死区域，裸 qoder: 按 cn→intl 回落。
+	if realm == "qoder-cn" || realm == "qoder-intl" || realm == "qoder" {
+		h.qoderChat(w, r, body, realm, bareModel, st)
 		return
 	}
 

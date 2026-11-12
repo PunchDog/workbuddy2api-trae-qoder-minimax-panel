@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -42,7 +44,7 @@ func (p *Panel) qoderAccounts(w http.ResponseWriter, r *http.Request) {
 	curName := ""
 	curExpires := ""
 	if a, err := ideauth.ReadQoderAuth(); err == nil {
-		cur = a.User.Email
+		cur = ideauth.QoderAuthKey(a)
 		curName = a.User.Name
 		curExpires = a.ExpiresAt
 	}
@@ -51,12 +53,25 @@ func (p *Panel) qoderAccounts(w http.ResponseWriter, r *http.Request) {
 		"current_email":   cur,
 		"current_name":    curName,
 		"current_expires": curExpires,
+		// client_dir 当前检测到的 Qoder 客户端数据目录名（com.qoder.app.stable=国际版 /
+		// com.qodercn.app.stable=国内版），给前端显示"本机装的是哪个版本"。
+		"client_dir": filepath.Base(ideauth.QoderDataDir()),
+		// platform 面板运行平台。客户端登录态收录（DPAPI 解密 / 拉起客户端 /
+		// 本机浏览器）只在 Windows 可用；Linux/容器部署时前端据此禁用相应按钮
+		// 并提示改用宿主机 qoder-capture 工具。
+		"platform":           runtime.GOOS,
+		"can_capture_client": runtime.GOOS == "windows",
 	})
 }
 
 // qoderAdd 把当前 Qoder 登录态保存进号池。
+// body 可选 {"realm":"cn|intl"}：显式指定收录哪个版本的客户端（缺省自动探测）。
 func (p *Panel) qoderAdd(w http.ResponseWriter, r *http.Request) {
-	snap, added, err := ideauth.UpsertQoderAccount()
+	var req struct {
+		Realm string `json:"realm"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	snap, added, err := ideauth.UpsertQoderAccountForRealm(strings.TrimSpace(req.Realm))
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "qoder_add_failed: "+err.Error())
 		return
@@ -289,18 +304,18 @@ func qoderLegacyCheckinItem(res *ideauth.QoderCheckinResult) ideauth.QoderChecki
 		}
 	}
 	item := ideauth.QoderCheckinItem{
-		Email:      res.Email,
-		Name:       res.Name,
-		UID:        res.UID,
-		Phase:      phase,
-		Msg:        res.Msg,
-		DeviceOK:   res.DeviceOK,
-		Refreshed:  res.Refreshed,
-		Exe:        res.Exe,
-		Base:       res.Base,
-		Scope:      res.Scope,
-		ClaimCID:   res.ClaimCID,
-		QuotaGroup: 1,
+		Email:        res.Email,
+		Name:         res.Name,
+		UID:          res.UID,
+		Phase:        phase,
+		Msg:          res.Msg,
+		DeviceOK:     res.DeviceOK,
+		Refreshed:    res.Refreshed,
+		Exe:          res.Exe,
+		Base:         res.Base,
+		Scope:        res.Scope,
+		ClaimCID:     res.ClaimCID,
+		QuotaGroup:   1,
 		Strategy:     ideauth.QoderStrategyFor(res.Email, phase, "", 1, verdict),
 		RotationRank: 1,
 	}
@@ -354,11 +369,11 @@ func (p *Panel) qoderCheckinStatus(w http.ResponseWriter, r *http.Request) {
 	// 100 Credits 的另一个号反而显示可签，两个号整个反了）。现在只信上游，
 	// 外加**可信**的本地记录（10:05 之后写入的完整时间戳）。
 	cur := map[string]any{}
-	if a, err := ideauth.ReadQoderAuth(); err == nil && a.User.Email != "" {
+	if a, err := ideauth.ReadQoderAuth(); err == nil && ideauth.QoderAuthKey(a) != "" {
 		oc := ideauth.QoderScanCurrent()
 		ph, _ := oc["phase"].(string)
 		oc["checked_in_today"] = ph == "claimed" ||
-			(ph != "claimable" && ideauth.CheckinRecordTrusted("qoder", a.User.Email))
+			(ph != "claimable" && ideauth.CheckinRecordTrusted("qoder", ideauth.QoderAuthKey(a)))
 		cur = oc
 	}
 	// 顶层 checked_in_today 与 POST checkin **同义**：只有**所有**账号今天都

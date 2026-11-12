@@ -78,11 +78,11 @@ func qoderProbeReward(auth *QoderAuth, dev *QoderDevice, cid, scope string) Qode
 	}
 	token := auth.Token
 	if qoderAuthExpired(auth) {
-		if nt, _, ok := qoderRefreshToken(auth, qoderOpenAPIBaseListForScope(scope)[0], dev); ok {
+		if nt, _, ok := qoderRefreshToken(auth, qoderOpenAPIBaseList(qoderAuthRealm(auth), scope)[0], dev); ok {
 			token = nt
 		}
 	}
-	for _, b := range qoderOpenAPIBaseListForScope(scope) {
+	for _, b := range qoderOpenAPIBaseList(qoderAuthRealm(auth), scope) {
 		st, raw, err := qoderDo(b, fmt.Sprintf(qoderPathReward, cid), http.MethodGet, token, nil, dev)
 		if err != nil {
 			continue
