@@ -26,6 +26,52 @@ func TestRecorderMetricsAndRecent(t *testing.T) {
 	}
 }
 
+func TestNormalizeEventSuccessOKFalse(t *testing.T) {
+	e := NormalizeEvent(Event{RequestID: "qoder", Status: 200, OK: false, Outcome: OutcomeSuccess})
+	if !e.OK || e.Outcome != OutcomeSuccess {
+		t.Fatalf("normalized event = %+v, want success and OK=true", e)
+	}
+}
+
+func TestNormalizeEventLegacyOK(t *testing.T) {
+	// 历史 Qoder/Trae 成功记录：HTTP 200、outcome="ok"、OK=false。
+	e := NormalizeEvent(Event{RequestID: "legacy-qoder", Status: 200, OK: false, Outcome: "ok"})
+	if e.Outcome != OutcomeSuccess || !e.OK {
+		t.Fatalf("normalized event = %+v, want outcome=%q OK=true", e, OutcomeSuccess)
+	}
+}
+
+func TestRecordNormalizesLegacyOK(t *testing.T) {
+	r := New(Config{})
+	r.Begin()
+	r.Record(Event{RequestID: "legacy-trae", Status: 200, OK: false, Outcome: "ok", DurationMs: 10})
+	s := r.Snapshot()
+	if s.Succeeded != 1 || s.Failed != 0 || len(s.Recent) != 1 {
+		t.Fatalf("snapshot = %+v, want one success", s)
+	}
+	if got := s.Recent[0]; got.Outcome != OutcomeSuccess || !got.OK {
+		t.Fatalf("recent = %+v, want normalized success", got)
+	}
+}
+
+func TestReadArchiveNormalizesLegacyOK(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "requests-2026-11-12.jsonl")
+	row := `{"time":"2026-11-12T18:02:08+08:00","request_id":"legacy","status":200,"ok":false,"outcome":"ok"}` + "\n"
+	if err := os.WriteFile(path, []byte(row), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := New(Config{Enabled: true, Dir: dir})
+	defer r.Close()
+	rows, err := r.ReadArchive(10, Filter{Outcome: OutcomeSuccess})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Outcome != OutcomeSuccess || !rows[0].OK {
+		t.Fatalf("rows = %+v, want one normalized success", rows)
+	}
+}
+
 func TestArchiveRotationReadAndFilter(t *testing.T) {
 	dir := t.TempDir()
 	r := New(Config{Enabled: true, Dir: dir, FileMaxBytes: 120, MaxBytes: 1 << 20, RetentionDays: 7})

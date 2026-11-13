@@ -320,6 +320,48 @@ process.stdout.write(JSON.stringify({
 	}
 }
 
+// 历史 Qoder/Trae 成功记录 outcome="ok" 必须显示绿色成功标签。
+func TestAppJSRequestOutcomeTagLegacyOK(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed; outcome tag test skipped")
+	}
+	script := `const fs = require('fs');
+const vm = require('vm');
+const src = fs.readFileSync(process.argv[2], 'utf8');
+const escStart = src.indexOf('function esc(');
+const escEnd = src.indexOf('function ago(');
+const start = src.indexOf('function reqMatch');
+const end = src.indexOf('function reqTokenCell');
+if ([escStart, escEnd, start, end].some(v => v < 0)) throw new Error('outcome tag helpers not found');
+const ctx = { String };
+vm.createContext(ctx);
+vm.runInContext(src.slice(escStart, escEnd) + src.slice(start, end) +
+  '\nthis.reqOutcomeTag=reqOutcomeTag; this.reqMatch=reqMatch;', ctx);
+process.stdout.write(JSON.stringify({
+  legacy: ctx.reqOutcomeTag({ status: 200, outcome: 'ok' }),
+  success: ctx.reqOutcomeTag({ status: 200, outcome: 'success' }),
+  error: ctx.reqOutcomeTag({ status: 503, outcome: 'http_error' }),
+  match: ctx.reqMatch({ outcome: 'ok' }, { outcome: 'success' }),
+}));`
+	f, err := os.CreateTemp(t.TempDir(), "request-outcome-tag-*.cjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(script); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	out, err := exec.Command(node, f.Name(), "app.js").CombinedOutput()
+	if err != nil {
+		t.Fatalf("outcome tag node test failed: %v\n%s", err, out)
+	}
+	want := `{"legacy":"<span class=\"tag ok\">200 成功</span>","success":"<span class=\"tag ok\">200 成功</span>","error":"<span class=\"tag bad\">503 HTTP 错误</span>","match":true}`
+	if strings.TrimSpace(string(out)) != want {
+		t.Fatalf("outcome tags=%s want %s", out, want)
+	}
+}
+
 // 模型按条件查询：域 / 能力 / 档位 / 价格 / 关键词，以及倍率、上下文、输出排序。
 func TestAppJSModelFilter(t *testing.T) {
 	node, err := exec.LookPath("node")

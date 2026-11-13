@@ -61,3 +61,4 @@ archive/**/*.key
 archive/**/config.json
 archive/**/auths/
 archive/**/credentials/
+.qoder-credits/

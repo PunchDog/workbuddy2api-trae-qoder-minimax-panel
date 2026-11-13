@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/linguo2625469/workbuddy2api-panel/internal/ideauth"
+	"github.com/linguo2625469/workbuddy2api-panel/internal/reqlog"
+	usagepkg "github.com/linguo2625469/workbuddy2api-panel/internal/usage"
 )
 
 // qoderRealmsFor 前缀 → 尝试顺序：显式前缀钉死区域；裸 qoder 按 cn→intl 回落。
@@ -31,20 +33,72 @@ func qoderRealmsFor(prefix string) []string {
 
 // qoderUsage 内层 OpenAI chunk 的 usage 子集（记账用）。
 type qoderUsage struct {
-	PromptTokens     int64 `json:"prompt_tokens"`
-	CompletionTokens int64 `json:"completion_tokens"`
-	TotalTokens      int64 `json:"total_tokens"`
+	PromptTokens     int64   `json:"prompt_tokens"`
+	CompletionTokens int64   `json:"completion_tokens"`
+	TotalTokens      int64   `json:"total_tokens"`
+	Credit           float64 `json:"credits,omitempty"`
+	HasCredit        bool    `json:"-"`
 }
 
 // qoderChunkUsage 从内层 chunk 提取 usage（没有返回 nil）。
 func qoderChunkUsage(chunk string) *qoderUsage {
 	var c struct {
-		Usage *qoderUsage `json:"usage"`
+		Usage *struct {
+			PromptTokens     int64    `json:"prompt_tokens"`
+			CompletionTokens int64    `json:"completion_tokens"`
+			TotalTokens      int64    `json:"total_tokens"`
+			Credit           *float64 `json:"credits"`
+			CreditLegacy     *float64 `json:"credit"`
+		} `json:"usage"`
 	}
 	if json.Unmarshal([]byte(chunk), &c) != nil || c.Usage == nil || c.Usage.TotalTokens <= 0 {
 		return nil
 	}
-	return c.Usage
+	u := &qoderUsage{
+		PromptTokens:     c.Usage.PromptTokens,
+		CompletionTokens: c.Usage.CompletionTokens,
+		TotalTokens:      c.Usage.TotalTokens,
+	}
+	if c.Usage.Credit != nil {
+		u.Credit, u.HasCredit = *c.Usage.Credit, true
+	} else if c.Usage.CreditLegacy != nil {
+		u.Credit, u.HasCredit = *c.Usage.CreditLegacy, true
+	}
+	return u
+}
+
+// qoderRecordUsage 把 Qoder 通道请求写入网关用量桶。Qoder 不走 WorkBuddy
+// recordAttempt，缺这一步会让用量页只剩下游账号的旧桶。
+func (h *Handler) qoderRecordUsage(st *chatStat, realm, model, uid string, started time.Time) {
+	if h.cfg.Usage == nil || st == nil {
+		return
+	}
+	hasUsage := st.totalTokens > 0
+	d := usagepkg.Delta{
+		PromptTokens:     st.promptTokens,
+		HasPromptTokens:  hasUsage,
+		CompletionTokens: st.completionTokens,
+		HasCompletion:    hasUsage,
+		TotalTokens:      st.totalTokens,
+		HasTotal:         hasUsage,
+		Credit:           st.credit,
+		HasCredit:        st.hasCredit,
+		HasLatency:       true,
+		LatencyMs:        time.Since(started).Milliseconds(),
+	}
+	if d.LatencyMs < 1 {
+		d.LatencyMs = 1
+	}
+	if hasUsage {
+		if tps, ok := tokensPerSecond(st.completionTokens, time.Since(started), st.ttfb); ok {
+			d.TokensPerSecond, d.HasTPS = tps, true
+		}
+	}
+	usageRealm := realm
+	if i := strings.IndexByte(model, ':'); i >= 0 {
+		usageRealm = model[:i]
+	}
+	h.cfg.Usage.Add(time.Now(), usageRealm, uid, model, d, st.status >= 200 && st.status < 300 && st.outcome == reqlog.OutcomeSuccess)
 }
 
 func (h *Handler) qoderChat(w http.ResponseWriter, r *http.Request, body []byte, prefix, bareModel string, st *chatStat) {
@@ -69,6 +123,9 @@ func (h *Handler) qoderChat(w http.ResponseWriter, r *http.Request, body []byte,
 			resp, err := ideauth.QoderChatDo(realm, snap.Auth, ideauth.QoderDeviceInfoFor("", realm), bareModel, encoded)
 			if err != nil {
 				lastErr = err
+				st.status = http.StatusBadGateway
+				st.outcome = "upstream_error"
+				h.qoderRecordUsage(st, realm, "qoder-"+realm+":"+bareModel, snap.UserID, t0)
 				continue
 			}
 			st.uid = snap.UserID
@@ -80,6 +137,7 @@ func (h *Handler) qoderChat(w http.ResponseWriter, r *http.Request, body []byte,
 			} else {
 				h.qoderSync(w, resp, fullModel, st)
 			}
+			h.qoderRecordUsage(st, realm, fullModel, st.uid, t0)
 			_ = resp.Body.Close()
 			return
 		}
@@ -101,7 +159,7 @@ func (h *Handler) qoderStream(w http.ResponseWriter, resp *http.Response, fullMo
 	w.WriteHeader(http.StatusOK)
 	flusher, _ := w.(http.Flusher)
 	st.status = http.StatusOK
-	st.outcome = "ok"
+	st.outcome = reqlog.OutcomeSuccess
 	st.toks = -1
 	err := ideauth.QoderForEachInnerChunk(resp, func(chunk string) error {
 		if u := qoderChunkUsage(chunk); u != nil {
@@ -109,6 +167,9 @@ func (h *Handler) qoderStream(w http.ResponseWriter, resp *http.Response, fullMo
 			st.completionTokens = u.CompletionTokens
 			st.totalTokens = u.TotalTokens
 			st.toks = int(u.TotalTokens)
+			if u.HasCredit {
+				st.credit, st.hasCredit = u.Credit, true
+			}
 		}
 		if _, werr := fmt.Fprintf(w, "data: %s\n\n", chunk); werr != nil {
 			return werr
@@ -174,13 +235,16 @@ func (h *Handler) qoderSync(w http.ResponseWriter, resp *http.Response, fullMode
 		return
 	}
 	st.status = http.StatusOK
-	st.outcome = "ok"
+	st.outcome = reqlog.OutcomeSuccess
 	st.toks = -1
 	if usage != nil {
 		st.promptTokens = usage.PromptTokens
 		st.completionTokens = usage.CompletionTokens
 		st.totalTokens = usage.TotalTokens
 		st.toks = int(usage.TotalTokens)
+		if usage.HasCredit {
+			st.credit, st.hasCredit = usage.Credit, true
+		}
 	}
 	msg := map[string]any{"role": "assistant", "content": content.String()}
 	if reasoning.Len() > 0 {

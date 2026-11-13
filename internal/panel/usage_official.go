@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/linguo2625469/workbuddy2api-panel/internal/auth"
+	"github.com/linguo2625469/workbuddy2api-panel/internal/ideauth"
 )
 
 // usageOfficialMaxPages 单账号单次最多翻页数（pageSize=100 → 上限 1000 条/账号），
@@ -163,6 +164,46 @@ func (p *Panel) usageOfficial(w http.ResponseWriter, r *http.Request) {
 	}
 	wg.Wait()
 
+	var qoderHistoricalCredits float64
+	qoderRows := ideauth.QoderCreditUsageAll(hours/24 + 1)
+	qoderCredits, qoderDays := ideauth.QoderCreditUsageSince(qoderRows, start)
+	startDay := start.Format("2006-01-02")
+	qoderModel := &usageOfficialModel{Model: "Qoder 官方消耗"}
+	for _, row := range qoderRows {
+		if !row.OK {
+			errs = append(errs, usageOfficialErr{
+				UID:      row.UID,
+				Nickname: row.Name,
+				Error:    "Qoder 官方消耗：" + row.Error,
+			})
+			continue
+		}
+		qoderHistoricalCredits += row.Total
+		var windowCredits float64
+		for _, day := range row.Daily {
+			if day.Date < startDay {
+				continue
+			}
+			windowCredits += day.Credits
+			dd := byDay[day.Date]
+			if dd == nil {
+				dd = &usageOfficialDay{Day: day.Date}
+				byDay[day.Date] = dd
+			}
+			dd.Credits += day.Credits
+		}
+		byAcct = append(byAcct, usageOfficialAccount{
+			UID:      row.UID,
+			Nickname: row.Name,
+			Realm:    "qoder-" + row.Realm,
+			Credits:  windowCredits,
+		})
+		qoderModel.Credits += windowCredits
+	}
+	if len(qoderRows) > 0 {
+		byModel["Qoder 官方消耗"] = qoderModel
+	}
+
 	sort.Slice(byAcct, func(i, j int) bool { return byAcct[i].Credits > byAcct[j].Credits })
 	models := make([]usageOfficialModel, 0, len(byModel))
 	for _, m := range byModel {
@@ -180,7 +221,7 @@ func (p *Panel) usageOfficial(w http.ResponseWriter, r *http.Request) {
 	for _, a := range byAcct {
 		totalReq += a.Requests
 		totalCredit += a.Credits
-		if a.Requests > 0 {
+		if a.Requests > 0 || a.Credits > 0 {
 			active++
 		}
 	}
@@ -202,6 +243,12 @@ func (p *Panel) usageOfficial(w http.ResponseWriter, r *http.Request) {
 		"by_account": byAcct,
 		"by_model":   models,
 		"series":     days,
-		"errors":     errs,
+		"qoder": map[string]any{
+			"credits":       qoderCredits,
+			"accounts":      qoderRows,
+			"daily":         qoderDays,
+			"total_credits": qoderHistoricalCredits,
+		},
+		"errors": errs,
 	})
 }

@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/linguo2625469/workbuddy2api-panel/internal/reqlog"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/traechat"
 )
 
@@ -76,7 +77,7 @@ func (h *Handler) traeChat(w http.ResponseWriter, r *http.Request, body []byte, 
 		return
 	}
 	st.status = http.StatusOK
-	st.outcome = "ok"
+	st.outcome = reqlog.OutcomeSuccess
 	if res.HasUsage {
 		st.promptTokens = res.Usage.PromptTokens
 		st.completionTokens = res.Usage.CompletionTokens
@@ -170,7 +171,7 @@ func (h *Handler) traeStream(w http.ResponseWriter, r *http.Request, relay *trae
 	flusher.Flush()
 
 	st.status = http.StatusOK
-	st.outcome = "ok"
+	st.outcome = reqlog.OutcomeSuccess
 	if res != nil && res.HasUsage {
 		st.promptTokens = res.Usage.PromptTokens
 		st.completionTokens = res.Usage.CompletionTokens

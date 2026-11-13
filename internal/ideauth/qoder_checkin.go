@@ -47,6 +47,8 @@ const (
 	qoderPathClaim         = "/sash/api/v1/me/campaigns/%s/claim"
 	qoderPathDeviceRefresh = "/api/v1/deviceToken/refresh"
 	qoderPathUsage         = "/api/v1/me/usage"
+	qoderPathCreditSummary = "/sash/api/v1/ai-conversations/credits-summary"
+	qoderPathCreditHeatmap = "/sash/api/v1/ai-conversations/credits-heatmap"
 
 	qoderClaimAction = "CLAIM_BENEFIT"
 )

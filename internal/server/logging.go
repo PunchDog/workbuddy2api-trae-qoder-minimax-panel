@@ -432,15 +432,7 @@ func (t *requestTrace) event(status int) reqlog.Event {
 	}
 	e.ClientIP = t.clientIP
 	e.UserAgent = t.userAgent
-	if e.Outcome == "" {
-		if status >= 200 && status < 300 {
-			e.Outcome = reqlog.OutcomeSuccess
-		} else {
-			e.Outcome = reqlog.OutcomeHTTPError
-		}
-	}
-	e.OK = status >= 200 && status < 300 && e.Outcome == reqlog.OutcomeSuccess
-	return e
+	return reqlog.NormalizeEvent(e)
 }
 
 // responseObserver 捕获 handler 实际写出的 HTTP 状态，同时保留 Flusher/Unwrap，

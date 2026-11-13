@@ -19,6 +19,7 @@ let reqFilter = { q: '', outcome: '' };
 let reqEntries = [];
 let usDim = 'account', usCreditDim = 'account', usSort = 'total';
 let usageData = null;
+let usageOfficialData = null;
 let reqRangeState = null; // 请求记录的时间范围（用量页的见 trangeState）
 
 const $ = id => document.getElementById(id);
@@ -1104,10 +1105,12 @@ function renderRequestMetrics(m, entries) {
 }
 
 /* reqMatch 请求记录筛选：q 对 IP/UA/模型/账号/请求 ID 做空格分词的 AND 包含匹配，
-   outcome 精确匹配。两者都在已拉取的条目上做（最多 1000 条），不发新请求。 */
+   outcome 精确匹配。两者都在已拉取的条目上做（最多 1000 条），不发新请求。
+   历史 Qoder/Trae 成功记录用 ok，按 success 同义处理。 */
 function reqMatch(e, f) {
   f = f || reqFilter;
-  if (f.outcome && String(e && e.outcome || '') !== f.outcome) return false;
+  const raw = String(e && e.outcome || '');
+  if (f.outcome && (raw === 'ok' ? 'success' : raw) !== f.outcome) return false;
   if (f.q) {
     const text = [e && e.client_ip, e && e.user_agent, e && e.model, e && e.account, e && e.request_id]
       .filter(Boolean).join(' ').toLowerCase();
@@ -1119,7 +1122,8 @@ function reqMatch(e, f) {
 }
 
 function reqOutcomeTag(e) {
-  const outcome = String(e && e.outcome || '');
+  const raw = String(e && e.outcome || '');
+  const outcome = raw === 'ok' ? 'success' : raw;
   const label = { success: '成功', http_error: 'HTTP 错误', stream_error: '流错误', interrupted: '中断' }[outcome] || outcome || '—';
   const cls = outcome === 'success' ? 'ok'
     : outcome === 'interrupted' ? 'warn'
@@ -1196,6 +1200,8 @@ if ($('reqRange')) trangeBind('reqRange', loadLogs, '0');
 function requestLogText(e) {
   const when = e && e.time ? new Date(e.time).toLocaleTimeString('zh-CN', { hour12: false }) : '—';
   const outcomeLabel = { success: '成功', http_error: 'HTTP 错误', stream_error: '流错误', interrupted: '中断' };
+  const raw = String(e && e.outcome || '');
+  const outcome = raw === 'ok' ? 'success' : raw;
   const token = Number(e && e.total_tokens || 0) ||
     (Number(e && e.prompt_tokens || 0) + Number(e && e.completion_tokens || 0));
   let credit = 'credit —';
@@ -1205,7 +1211,7 @@ function requestLogText(e) {
   }
   return [
     when,
-    String(e && e.status || '—') + ' ' + (outcomeLabel[e && e.outcome] || (e && e.outcome) || '—'),
+    String(e && e.status || '—') + ' ' + (outcomeLabel[outcome] || outcome || '—'),
     e && e.model || '—',
     e && e.account || '—',
     e && e.client_ip || '—',
@@ -3896,7 +3902,9 @@ async function loadUsageOfficial() {
   if (btn) { btn.disabled = true; btn.textContent = '读取中…'; }
   try {
     const d = await api('usage/official?hours=' + encodeURIComponent(hours));
+    usageOfficialData = d;
     renderUsageOfficial(d);
+    renderQoderOfficialUsage();
   } catch (e) {
     if ($('usOffChart')) $('usOffChart').innerHTML = '<div class="us-empty">读取官方用量失败：' + esc(e.message) + '</div>';
   } finally {
@@ -3916,6 +3924,7 @@ function renderUsageOfficial(d) {
   const errs = d.errors || [];
   $('usOffNote').textContent = (win ? win + ' · ' : '') +
     (d.start ? '自 ' + String(d.start).slice(0, 16).replace('T', ' ') : '') +
+    (d.qoder && Number(d.qoder.credits || 0) ? ' · Qoder 官方消耗 ' + fmtCredit(d.qoder.credits) : '') +
     (errs.length ? ' · ' + errs.length + ' 个账号读取失败' : '');
 
   $('usOffAccBody').innerHTML = (d.by_account || []).map(x => {
@@ -4025,11 +4034,36 @@ async function loadUsageQoder() {
     box.innerHTML = parts.join('');
     st.hidden = true;
     $('usQoderNote').textContent = rows.length + ' 个号 · ' + okCount + ' 个查询成功 · 上游实时额度（非网关统计）';
+    renderQoderOfficialUsage();
   } catch (e) {
     st.hidden = false; st.className = 'state err'; st.textContent = e.message;
   }
 }
 if ($('btnUsageQoder')) $('btnUsageQoder').onclick = loadUsageQoder;
+
+function renderQoderOfficialUsage() {
+  const box = $('usQoderGroups');
+  const d = usageOfficialData && usageOfficialData.qoder;
+  if (!box || !d) return;
+  const rows = (d.accounts || []).filter(x => x && x.ok).map(x =>
+    '<tr><td>' + esc(x.name || x.email || 'Qoder 账号') +
+    '<div class="note">' + esc(x.email || '') + ' · ' + esc(x.realm || '') + '</div></td>' +
+    '<td class="num">' + fmtCredit(x.total) + '</td>' +
+    '<td class="num">' + fmtCredit(x.peak) + '</td>' +
+    '<td class="num">' + esc(x.peak_date || '—') + '</td></tr>').join('');
+  const old = $('usQoderOfficial');
+  if (old) old.remove();
+  if (!rows) return;
+  const wrap = document.createElement('div');
+  wrap.id = 'usQoderOfficial';
+  wrap.innerHTML =
+    '<div class="pad"><div class="ck-group">Qoder 官方消耗 · ' +
+    fmtCredit(d.credits) + '（当前窗口） / ' + fmtCredit(d.total_credits) + '（历史累计）</div></div>' +
+    '<div class="tbl-wrap"><table class="acc"><thead><tr><th>账号</th>' +
+    '<th class="num">历史累计</th><th class="num">单日峰值</th><th class="num">峰值日期</th></tr></thead>' +
+    '<tbody>' + rows + '</tbody></table></div>';
+  box.appendChild(wrap);
+}
 
 /* ── 积分构成 ─────────────────────────────────────────────────────── */
 /* 一个账号的余额是若干积分包之和。包按来源命名（「国内运营裂变包」「拉新权益包」

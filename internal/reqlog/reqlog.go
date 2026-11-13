@@ -80,10 +80,10 @@ type Event struct {
 	HasCredit        bool      `json:"credit_known"`
 	// CacheHitTokens / CacheMissTokens 上游前缀缓存命中/未命中 token（issue #92）。
 	// 上游未回该维度时两者皆零值省略；hit=0 + miss>0 即整段未命中。
-	CacheHitTokens  int64 `json:"cache_hit_tokens,omitempty"`
-	CacheMissTokens int64 `json:"cache_miss_tokens,omitempty"`
-	ClientIP         string    `json:"client_ip,omitempty"`
-	UserAgent        string    `json:"user_agent,omitempty"`
+	CacheHitTokens  int64  `json:"cache_hit_tokens,omitempty"`
+	CacheMissTokens int64  `json:"cache_miss_tokens,omitempty"`
+	ClientIP        string `json:"client_ip,omitempty"`
+	UserAgent       string `json:"user_agent,omitempty"`
 }
 
 // Filter 用于从归档中筛选最近记录。字符串字段一律「包含」匹配（大小写不敏感），
@@ -121,6 +121,25 @@ type Snapshot struct {
 	AvgDurationMs   float64      `json:"avg_duration_ms"`
 	Recent          []Event      `json:"recent"`
 	Archive         ArchiveStats `json:"archive"`
+}
+
+// NormalizeEvent 把请求结果归一到当前枚举。
+//
+// 历史 Qoder/Trae 成功记录写成 outcome="ok" 且 OK=false；不归一会让 2xx 在面板
+// 标红、在进程指标里算失败。自定义错误值保留原值，便于按原始通道原因排查。
+func NormalizeEvent(e Event) Event {
+	switch e.Outcome {
+	case "ok":
+		e.Outcome = OutcomeSuccess
+	case "":
+		if e.Status == 200 && e.OK {
+			e.Outcome = OutcomeSuccess
+		} else {
+			e.Outcome = OutcomeHTTPError
+		}
+	}
+	e.OK = e.Status >= 200 && e.Status < 300 && e.Outcome == OutcomeSuccess
+	return e
 }
 
 // Recorder 并发安全的有界请求指标与归档记录器。
@@ -167,13 +186,7 @@ func (r *Recorder) Record(e Event) {
 	if e.Time.IsZero() {
 		e.Time = time.Now()
 	}
-	if e.Outcome == "" {
-		if e.Status == 200 && e.OK {
-			e.Outcome = OutcomeSuccess
-		} else {
-			e.Outcome = OutcomeHTTPError
-		}
-	}
+	e = NormalizeEvent(e)
 	r.mu.Lock()
 	if r.inFlight > 0 {
 		r.inFlight--
@@ -561,7 +574,11 @@ func readFile(path string, filter Filter) ([]Event, error) {
 	var out []Event
 	for scanner.Scan() {
 		var e Event
-		if json.Unmarshal(scanner.Bytes(), &e) != nil || !filter.match(e) {
+		if json.Unmarshal(scanner.Bytes(), &e) != nil {
+			continue
+		}
+		e = NormalizeEvent(e)
+		if !filter.match(e) {
 			continue
 		}
 		out = append(out, e)
