@@ -259,11 +259,39 @@ type Config struct {
 		} `json:"chat"`
 	} `json:"trae"`
 
+	// Qoder 双区模型通道（qoder-cn:/qoder-intl:/qoder: 前缀）的调度参数。
+	// 账号来自 IDE 号池的 Qoder 登录态，与 WorkBuddy/Trae 的池完全独立。
+	Qoder struct {
+		// Chat 聊天调度：冷却/并发/超时口径。缺省值与 trae.chat 对齐，
+		// 但 Qoder 的额度是**按人共享**的每日 100 Credits（10:00 CST 刷新），
+		// 所以多一个 peer_cooldown 控制「同一人组其它号」的避让时长。
+		Chat struct {
+			// MaxPerAccount 单账号并发上限；<=0 用缺省 2。
+			MaxPerAccount int `json:"max_per_account"`
+			// FirstEventTimeout 首个信封帧等待上限，如 "120s"；空 = 120s。
+			// 上游积分耗尽时 HTTP 仍是 200、403 藏在信封里，这一帧决定能否换号。
+			FirstEventTimeout string `json:"first_event_timeout"`
+			// IdleTimeout 流中相邻两帧间隔上限，如 "180s"；空 = 180s。
+			// 超时即 cancel 上游请求，停止生成（不再白烧积分）。
+			IdleTimeout string `json:"idle_timeout"`
+			// CatalogTTL 模型目录实时缓存时长，如 "10m"；空 = 10m。
+			// 只影响 /v1/models 与面板；聊天路径永远只读缓存，不阻塞拉上游。
+			CatalogTTL string `json:"catalog_ttl"`
+			// PeerCooldown 积分耗尽时同一人组其它号的短冷却，如 "10m"；空 = 10m。
+			// 不永久跳过：付费额度可能按号计，短冷却后仍给机会。
+			PeerCooldown string `json:"peer_cooldown"`
+		} `json:"chat"`
+	} `json:"qoder"`
+
 	// 解析后
 	SoftRateDur            time.Duration `json:"-"`
 	TraeChatFirstEvent     time.Duration `json:"-"`
 	TraeChatIdle           time.Duration `json:"-"`
 	TraeChatCatalogTTL     time.Duration `json:"-"`
+	QoderChatFirstEvent    time.Duration `json:"-"`
+	QoderChatIdle          time.Duration `json:"-"`
+	QoderChatCatalogTTL    time.Duration `json:"-"`
+	QoderChatPeerCooldown  time.Duration `json:"-"`
 	SoftRateMaxDur         time.Duration `json:"-"`
 	BreakerCooldownDur     time.Duration `json:"-"`
 	BreakerCooldownMaxD    time.Duration `json:"-"`
@@ -354,6 +382,13 @@ func Default() *Config {
 	c.Trae.Chat.FirstEventTimeout = "120s"
 	c.Trae.Chat.IdleTimeout = "180s"
 	c.Trae.Chat.CatalogTTL = "30m"
+	// Qoder 双区通道：目录实时缓存 10m（上游目录变动比 Trae 频繁），
+	// 同一人组短冷却 10m（每日额度按人共享，但付费额度可能按号）。
+	c.Qoder.Chat.MaxPerAccount = 2
+	c.Qoder.Chat.FirstEventTimeout = "120s"
+	c.Qoder.Chat.IdleTimeout = "180s"
+	c.Qoder.Chat.CatalogTTL = "10m"
+	c.Qoder.Chat.PeerCooldown = "10m"
 	return c
 }
 
@@ -758,10 +793,35 @@ func (c *Config) normalize() error {
 			return fmt.Errorf("trae.chat.catalog_ttl: %w", err)
 		}
 	}
+	// Qoder 双区通道调度参数（无 enabled 开关：号池有账号即提供该前缀模型）。
+	if c.Qoder.Chat.MaxPerAccount <= 0 {
+		c.Qoder.Chat.MaxPerAccount = 2
+	}
+	var qerr error
+	if c.QoderChatFirstEvent, qerr = parseQoderChatDur(c.Qoder.Chat.FirstEventTimeout, 120*time.Second); qerr != nil {
+		return fmt.Errorf("qoder.chat.first_event_timeout: %w", qerr)
+	}
+	if c.QoderChatIdle, qerr = parseQoderChatDur(c.Qoder.Chat.IdleTimeout, 180*time.Second); qerr != nil {
+		return fmt.Errorf("qoder.chat.idle_timeout: %w", qerr)
+	}
+	if c.QoderChatCatalogTTL, qerr = parseQoderChatDur(c.Qoder.Chat.CatalogTTL, 10*time.Minute); qerr != nil {
+		return fmt.Errorf("qoder.chat.catalog_ttl: %w", qerr)
+	}
+	if c.QoderChatPeerCooldown, qerr = parseQoderChatDur(c.Qoder.Chat.PeerCooldown, 10*time.Minute); qerr != nil {
+		return fmt.Errorf("qoder.chat.peer_cooldown: %w", qerr)
+	}
 	if err := c.validateScheduleHours(); err != nil {
 		return err
 	}
 	return c.normalizePrompt()
+}
+
+// parseQoderChatDur 空串回落缺省（配置项注释承诺「空 = 缺省」），非法值报错。
+func parseQoderChatDur(s string, def time.Duration) (time.Duration, error) {
+	if strings.TrimSpace(s) == "" {
+		return def, nil
+	}
+	return time.ParseDuration(s)
 }
 
 // normalizePrompt 校验 prompt.mode 并按 file 加载提示词文本（custom/append 模式）。

@@ -70,6 +70,10 @@ type chatStat struct {
 	clientIP  string
 	userAgent string
 
+	// 网关自身开销观测（与上游等待分离）：body 量级 + 入口派生耗时。
+	bodyBytes        int
+	gatewayPrepareMs int64
+
 	logged bool
 }
 
@@ -79,7 +83,16 @@ func newChatStat(now time.Time, body []byte, stream bool) *chatStat {
 	if stream {
 		mode = "stream"
 	}
-	return &chatStat{start: now, model: parseModelFromBody(body), mode: mode, toks: -1}
+	return &chatStat{start: now, model: parseModelFromBody(body), mode: mode, toks: -1, bodyBytes: len(body)}
+}
+
+// markPrepared 记录入口派生耗时（读 body 完成 → 交给通道 / 进轮转循环前）。
+// 只记一次：轮转循环内每轮都会重新准备 body，那部分不属于「入口派生」。
+func (s *chatStat) markPrepared(start time.Time) {
+	if s == nil || s.gatewayPrepareMs != 0 || start.IsZero() {
+		return
+	}
+	s.gatewayPrepareMs = time.Since(start).Milliseconds()
 }
 
 // done 幂等落一行表格日志。
@@ -429,6 +442,9 @@ func (t *requestTrace) event(status int) reqlog.Event {
 		e.HasCredit = s.hasCredit
 		e.CacheHitTokens = s.cacheHit
 		e.CacheMissTokens = s.cacheMiss
+		e.Stream = s.mode == "stream"
+		e.BodyBytes = s.bodyBytes
+		e.GatewayPrepareMs = s.gatewayPrepareMs
 	}
 	e.ClientIP = t.clientIP
 	e.UserAgent = t.userAgent

@@ -37,7 +37,7 @@ type QoderCreditUsage struct {
 
 // QoderCreditUsageAll 汇总号池全部账号的官方积分消耗。
 func QoderCreditUsageAll(days int) []QoderCreditUsage {
-	pool, err := LoadQoderPool()
+	pool, err := qoderPoolReadOnly()
 	if err != nil {
 		return []QoderCreditUsage{{Error: "读取 Qoder 号池失败: " + err.Error()}}
 	}

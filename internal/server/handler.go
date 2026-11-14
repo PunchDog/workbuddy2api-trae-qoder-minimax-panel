@@ -579,6 +579,9 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid_request", "read body: "+err.Error())
 		return
 	}
+	// 入口派生计时起点：下面 peek/tools/model/会话键/轮级键/图片判定都要全量解析
+	// 一遍 body，这段是网关自身开销（与上游等待无关），归档到 gateway_prepare_ms。
+	prepareStart := time.Now()
 	var peek struct {
 		Stream bool   `json:"stream"`
 		Model  string `json:"model"`
@@ -616,21 +619,25 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	// MiniMax 开放平台（API Key）：按配置里的组前缀分流（mm: / mms: …）。
 	// 放在 realm 判断之前，组 id 由配置文件决定，无需改代码。
 	if g, bare, ok := h.cfg.MMAPI.Match(peek.Model); ok {
+		st.markPrepared(prepareStart)
 		h.mmChat(w, r, body, bare, g, st)
 		return
 	}
 
 	if realm == "trae" {
+		st.markPrepared(prepareStart)
 		h.traeChat(w, r, body, bareModel, st)
 		return
 	}
 	// MiniMax 通道分流：模型名带 "minimax:" 前缀 → Anthropic 协议转换后转发。
 	if realm == "minimax" {
+		st.markPrepared(prepareStart)
 		h.minimaxChat(w, r, body, bareModel, st)
 		return
 	}
 	// Qoder 通道分流：qoder-cn:/qoder-intl: 钉死区域，裸 qoder: 按 cn→intl 回落。
 	if realm == "qoder-cn" || realm == "qoder-intl" || realm == "qoder" {
+		st.markPrepared(prepareStart)
 		h.qoderChat(w, r, body, realm, bareModel, st)
 		return
 	}
@@ -822,6 +829,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		chatMeta.ConversationRequestID = session.TurnRequestID("")
 	}
 	chatMeta.TraceID = r.Header.Get("X-Trace-ID")
+	st.markPrepared(prepareStart)
 
 	for i := 0; i < h.cfg.MaxRotate; i++ {
 		// 选号：粘性号优先（PickByUIDForModel 已校验该模型可用性 + 在途未满），否则普通轮换。

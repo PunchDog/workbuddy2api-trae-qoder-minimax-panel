@@ -40,7 +40,75 @@ func qoderPoolPath() string {
 // 那份把先写的账号改动整个盖掉。所有读改写路径必须走 UpdateQoderPool。
 var qoderPoolMu sync.Mutex
 
+// qoderPoolCache 只读号池缓存：文件 mtime+size 未变就复用已解析结果。
+//
+// 为什么需要：聊天/目录/面板每次请求都走 LoadQoderPool → 读盘 + 全量 JSON 解析，
+// 且全程持 qoderPoolMu，把签到回写也一起堵住。号池是「外部进程偶尔写、网关高频读」
+// 的形态（宿主机 qoder-capture.bat 也写同一份文件），所以失效判据必须是文件状态
+// 而不是「本进程写过才失效」——只靠写路径失效会读到别的进程改前的旧号。
+//
+// 只服务只读消费方。读改写路径（UpdateQoderPool / SwitchQoderTo）必须继续走
+// loadQoderPool 直读：它们会改动返回对象，拿到共享缓存就会污染其它请求。
+// qoderPoolCacheState 号池只读缓存的当前状态（size=-1 表示「文件不存在」那一档）。
+type qoderPoolCacheState struct {
+	path   string
+	mtime  time.Time
+	size   int64
+	loaded bool
+	file   *QoderPoolFile
+}
+
+var qoderPoolCache qoderPoolCacheState
+
+// loadQoderPoolCached 取只读号池（调用方须已持 qoderPoolMu）。
+// 持锁期间完成 Stat+读盘+解析，并发调用天然单飞：第一个装载，其余命中缓存。
+func loadQoderPoolCached() (*QoderPoolFile, error) {
+	p := qoderPoolPath()
+	st, err := os.Stat(p)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return nil, err
+		}
+		// 文件不存在：缓存一份空池，避免每次请求都重走 Stat 失败分支。
+		if qoderPoolCache.loaded && qoderPoolCache.path == p && qoderPoolCache.size == -1 {
+			return qoderPoolCache.file, nil
+		}
+		f := &QoderPoolFile{}
+		qoderPoolCache = qoderPoolCacheState{path: p, size: -1, loaded: true, file: f}
+		return f, nil
+	}
+	if qoderPoolCache.loaded && qoderPoolCache.path == p &&
+		qoderPoolCache.mtime.Equal(st.ModTime()) && qoderPoolCache.size == st.Size() {
+		return qoderPoolCache.file, nil
+	}
+	f, err := loadQoderPool()
+	if err != nil {
+		return nil, err
+	}
+	qoderPoolCache = qoderPoolCacheState{path: p, mtime: st.ModTime(), size: st.Size(), loaded: true, file: f}
+	return f, nil
+}
+
+// invalidateQoderPoolCache 写盘后丢弃缓存（调用方须已持 qoderPoolMu）。
+func invalidateQoderPoolCache() {
+	qoderPoolCache.loaded = false
+	qoderPoolCache.file = nil
+}
+
+// cloneQoderSnapshot 复制快照（含登录态），让只读消费方拿不到缓存里的共享指针。
+func cloneQoderSnapshot(a *QoderSnapshot) *QoderSnapshot {
+	if a == nil {
+		return nil
+	}
+	c := *a
+	c.Auth = cloneQoderAuth(a.Auth)
+	return &c
+}
+
 // LoadQoderPool 读取号池（不存在返回空池）。
+//
+// 返回的是**独立对象**（每次重新读盘解析）：调用方可能改动它（SwitchQoderTo
+// 会写 SavedAt），不能与只读缓存共享。只读高频路径请用 QoderPoolSnapshotsForRealm。
 func LoadQoderPool() (*QoderPoolFile, error) {
 	qoderPoolMu.Lock()
 	defer qoderPoolMu.Unlock()
@@ -62,6 +130,14 @@ func loadQoderPool() (*QoderPoolFile, error) {
 		return nil, fmt.Errorf("解析 %s 失败: %w", p, err)
 	}
 	return &f, nil
+}
+
+// qoderPoolReadOnly 加锁取只读号池（缓存命中即零读盘、零解析）。
+// 返回对象是共享的，调用方**只读**；要改动请走 LoadQoderPool / UpdateQoderPool。
+func qoderPoolReadOnly() (*QoderPoolFile, error) {
+	qoderPoolMu.Lock()
+	defer qoderPoolMu.Unlock()
+	return loadQoderPoolCached()
 }
 
 // SaveQoderPool 原子写回号池（按 Email 排序）。
@@ -89,7 +165,11 @@ func saveQoderPool(f *QoderPoolFile) error {
 	if err != nil {
 		return err
 	}
-	return atomicWrite(qoderPoolPath(), b)
+	if err := atomicWrite(qoderPoolPath(), b); err != nil {
+		return err
+	}
+	invalidateQoderPoolCache()
+	return nil
 }
 
 // UpdateQoderPool 在包级互斥锁内执行 Load → fn → Save（契约 C-QD-POOL@1）。
@@ -148,15 +228,18 @@ func UpsertQoderAccountForRealm(realm string) (*QoderSnapshot, bool, error) {
 
 // QoderPoolSnapshotsForRealm 返回号池中指定 realm 的快照（老账号无 Realm
 // 字段时按 RuntimeEnv 回落推断）。供实时目录拉取等需要凭证的按区操作使用。
+//
+// 走只读缓存（文件 mtime+size 未变即零读盘），返回的是快照副本：调用方改动
+// 不会污染缓存，也不会影响其它并发请求。
 func QoderPoolSnapshotsForRealm(realm string) []*QoderSnapshot {
-	f, err := LoadQoderPool()
+	f, err := qoderPoolReadOnly()
 	if err != nil {
 		return nil
 	}
 	var out []*QoderSnapshot
 	for _, a := range f.Accounts {
 		if a != nil && qoderRealmFromSnapshot(a) == realm {
-			out = append(out, a)
+			out = append(out, cloneQoderSnapshot(a))
 		}
 	}
 	return out
@@ -231,7 +314,7 @@ type QoderAccountView struct {
 
 // ListQoderAccounts 返回号池账号视图，标记当前登录账号。
 func ListQoderAccounts() ([]QoderAccountView, error) {
-	f, err := LoadQoderPool()
+	f, err := qoderPoolReadOnly()
 	if err != nil {
 		return nil, err
 	}
@@ -431,7 +514,7 @@ func QoderScopePeers(email string) []string {
 	if len(peers) == 0 {
 		return nil
 	}
-	pool, err := LoadQoderPool()
+	pool, err := qoderPoolReadOnly()
 	if err != nil || pool == nil {
 		return nil
 	}

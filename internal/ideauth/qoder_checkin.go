@@ -136,13 +136,51 @@ func qoderMachineOS() string {
 }
 
 // QoderRuntimeInfoExe 定位客户端自带的 runtime-info.exe（找不到返回空串）。
+//
+// 目录搜索（Glob + 逐个 Stat + 按 mtime 排序）不便宜，而安装路径在进程运行期间
+// 稳定，所以搜索结果缓存 10min（含「找不到」的空结果——容器里每次调用都白搜一遍）。
+// 显式 QODER_UMID_EXE 时绕过缓存：测试/排错要即时生效。
+//
+// 设备指纹的其余部分（machine-id / build-manifest / hostname）**不缓存**：
+// 切号会改写 machine-id，缓存会让切号后的请求带着旧身份出站。
 func QoderRuntimeInfoExe() string {
 	if v := strings.TrimSpace(os.Getenv("QODER_UMID_EXE")); v != "" {
 		if _, err := os.Stat(v); err == nil {
 			return v
 		}
+		return qoderSearchRuntimeInfoExe()
 	}
-	local := os.Getenv("LOCALAPPDATA")
+	return qoderRuntimeInfoExeCached()
+}
+
+// qoderRuntimeInfoExeTTL exe 定位结果缓存时长（与 runtime-info 指纹缓存同口径）。
+const qoderRuntimeInfoExeTTL = 10 * time.Minute
+
+var qoderRuntimeInfoExeCache = struct {
+	mu     sync.Mutex
+	at     time.Time
+	exe    string
+	loaded bool
+}{}
+
+func qoderRuntimeInfoExeCached() string {
+	qoderRuntimeInfoExeCache.mu.Lock()
+	if qoderRuntimeInfoExeCache.loaded && time.Since(qoderRuntimeInfoExeCache.at) < qoderRuntimeInfoExeTTL {
+		exe := qoderRuntimeInfoExeCache.exe
+		qoderRuntimeInfoExeCache.mu.Unlock()
+		return exe
+	}
+	qoderRuntimeInfoExeCache.mu.Unlock()
+	exe := qoderSearchRuntimeInfoExe()
+	qoderRuntimeInfoExeCache.mu.Lock()
+	qoderRuntimeInfoExeCache.exe, qoderRuntimeInfoExeCache.at = exe, time.Now()
+	qoderRuntimeInfoExeCache.loaded = true
+	qoderRuntimeInfoExeCache.mu.Unlock()
+	return exe
+}
+
+// qoderSearchRuntimeInfoExe 在安装目录里搜 runtime-info.exe（版本目录最新优先）。
+func qoderSearchRuntimeInfoExe() string {
 	var roots []string
 	// 版本目录（最新优先）
 	for _, base := range qoderInstallBases() {
@@ -158,7 +196,6 @@ func QoderRuntimeInfoExe() string {
 		roots = append(roots, vers...)
 		roots = append(roots, filepath.Join(base, "resources", "umid", "runtime-info.exe"))
 	}
-	_ = local
 	for _, p := range roots {
 		if _, err := os.Stat(p); err == nil {
 			return p

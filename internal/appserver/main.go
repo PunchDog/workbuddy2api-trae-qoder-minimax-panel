@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/linguo2625469/workbuddy2api-panel/internal/auth"
+	"github.com/linguo2625469/workbuddy2api-panel/internal/ideauth"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/livecfg"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/minimax"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/mmapi"
@@ -456,6 +457,19 @@ func Run() {
 	} else {
 		log.Printf("Trae 模型通道已禁用（trae.chat.enabled=false）")
 	}
+
+	// Qoder 双区通道（qoder-cn:/qoder-intl:/qoder: 前缀）调度参数注入。
+	// 账号来自 IDE 号池的 Qoder 登录态，无独立开关：号池有账号即提供该前缀模型。
+	ideauth.ConfigureQoderChat(ideauth.QoderChatOptions{
+		MaxPerAccount:     cfg.Qoder.Chat.MaxPerAccount,
+		FirstEventTimeout: cfg.QoderChatFirstEvent,
+		IdleTimeout:       cfg.QoderChatIdle,
+		CatalogTTL:        cfg.QoderChatCatalogTTL,
+		PeerCooldown:      cfg.QoderChatPeerCooldown,
+	})
+	log.Printf("Qoder 双区通道调度已启用：单账号并发 %d，首帧 %s，流中空闲 %s，目录缓存 %s，同人组冷却 %s",
+		cfg.Qoder.Chat.MaxPerAccount, cfg.QoderChatFirstEvent, cfg.QoderChatIdle,
+		cfg.QoderChatCatalogTTL, cfg.QoderChatPeerCooldown)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

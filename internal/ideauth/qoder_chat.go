@@ -13,12 +13,13 @@ package ideauth
 
 import (
 	"bufio"
+	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -261,55 +262,242 @@ func normalizeQoderTools(tools []any) []any {
 	return out
 }
 
-// QoderChatDo 发起签名聊天请求：逐网关候选尝试，200 返回响应（调用方负责 Close）。
-// 签名只覆盖 path，换主机不影响签名有效性。
-func QoderChatDo(realm string, auth *QoderAuth, dev *QoderDevice, modelKey, encoded string) (*http.Response, error) {
+// QoderChatFailKind 失败分类：决定调度侧的冷却口径（见 QoderChatNoteFailure）。
+type QoderChatFailKind int
+
+const (
+	// QoderFailUpstream 5xx / 其它信封状态：罚网关主机，不罚号。
+	QoderFailUpstream QoderChatFailKind = iota
+	// QoderFailCredits 403 积分耗尽/套餐限制（实测 cn 配额耗尽即此态，
+	// 信封 code 112 带 pricingUrl）：冷却到次日 10:00 CST。
+	QoderFailCredits
+	// QoderFailAuth 401 凭证失效：短冷却，不删号。
+	QoderFailAuth
+	// QoderFailRate 429 限流：短冷却带抖动。
+	QoderFailRate
+	// QoderFailTransport 网络/超时/无可用主机：罚主机，不罚号。
+	QoderFailTransport
+	// QoderFailClient 客户端断连：什么都不罚。
+	QoderFailClient
+)
+
+// QoderChatError 聊天失败（带分类与网关主机，供调度侧决定冷却）。
+type QoderChatError struct {
+	Kind   QoderChatFailKind
+	Status int    // HTTP 状态或信封 statusCodeValue；0 = 传输层失败
+	Host   string // 失败的网关主机
+	Msg    string
+}
+
+func (e *QoderChatError) Error() string {
+	if e.Status > 0 {
+		return fmt.Sprintf("qoder: 上游状态 %d: %s", e.Status, e.Msg)
+	}
+	return "qoder: " + e.Msg
+}
+
+// classifyQoderStatus HTTP/信封状态 → 失败分类。
+func classifyQoderStatus(status int) QoderChatFailKind {
+	switch {
+	case status == http.StatusForbidden:
+		return QoderFailCredits
+	case status == http.StatusUnauthorized:
+		return QoderFailAuth
+	case status == http.StatusTooManyRequests:
+		return QoderFailRate
+	default:
+		return QoderFailUpstream
+	}
+}
+
+// QoderChatStream 首帧已确认成功的上游流（调用方负责 Close）。
+//
+// 为什么要先探首帧：上游积分耗尽时 HTTP 仍是 200，403 藏在 SSE 信封里。
+// 旧实现拿到 200 就提交响应头，等看到信封 403 已经换不了号——整条请求失败，
+// 号池里其它有额度的号用不上。先读一帧再提交，失败就能换号。
+type QoderChatStream struct {
+	Resp *http.Response
+
+	sc        *qoderEnvelopeScanner
+	first     string // 首帧内层 chunk（已消费，中继时先回放）
+	firstDone bool   // 首帧就是 [DONE]（空回答）
+	host      string
+	cancel    context.CancelFunc
+	wd        *qoderIdleWatchdog
+	idle      time.Duration
+	closed    bool
+}
+
+// Host 本次成功使用的网关主机（日志用）。
+func (s *QoderChatStream) Host() string { return s.host }
+
+// TimedOut 是否因流中空闲/首帧等待超时被看门狗掐断（区别于客户端断连）。
+func (s *QoderChatStream) TimedOut() bool { return s.wd.timedOut() }
+
+// Close 释放连接与看门狗（幂等）。
+func (s *QoderChatStream) Close() {
+	if s == nil || s.closed {
+		return
+	}
+	s.closed = true
+	s.wd.stop()
+	if s.Resp != nil && s.Resp.Body != nil {
+		_ = s.Resp.Body.Close()
+	}
+	s.cancel()
+}
+
+// ForEachInnerChunk 回放首帧后继续解包信封，内层 OpenAI chunk 原样交给 fn。
+func (s *QoderChatStream) ForEachInnerChunk(fn func(chunk string) error) error {
+	if s.first != "" {
+		if err := fn(s.first); err != nil {
+			return err
+		}
+	}
+	if s.firstDone {
+		return nil
+	}
+	for {
+		s.wd.touch(s.idle)
+		chunk, done, err := s.sc.next()
+		if err != nil {
+			return err
+		}
+		if done {
+			return nil
+		}
+		if chunk == "" {
+			continue
+		}
+		if err := fn(chunk); err != nil {
+			return err
+		}
+	}
+}
+
+// QoderChatOpen 发起签名聊天请求并**探到首个信封帧**才返回成功。
+// 逐网关候选尝试；账号级失败（403/401/429）立即返回不换主机（换主机无用，
+// 由调度侧换号）；传输层/5xx 才换下一个主机。
+func QoderChatOpen(ctx context.Context, realm string, auth *QoderAuth, dev *QoderDevice, modelKey, encoded string) (*QoderChatStream, error) {
 	if auth == nil || strings.TrimSpace(auth.Token) == "" {
-		return nil, errors.New("qoder: 无可用账号凭证")
+		return nil, &QoderChatError{Kind: QoderFailAuth, Msg: "无可用账号凭证"}
 	}
 	sess, err := qoderCosySessionFor(auth.User.ID, auth.User.Name, auth.Token, auth.RefreshToken)
 	if err != nil {
-		return nil, err
+		return nil, &QoderChatError{Kind: QoderFailAuth, Msg: err.Error()}
 	}
+	hosts := qoderUsableHosts(realm)
+	if len(hosts) == 0 {
+		return nil, &QoderChatError{Kind: QoderFailTransport, Msg: "网关主机均在冷却中"}
+	}
+	opts := qoderChatOptions()
 	var lastErr error
-	for _, host := range QoderGatewayCandidates(realm) {
-		rawURL := host + qoderChatPath
-		req, err := http.NewRequest(http.MethodPost, rawURL, strings.NewReader(encoded))
-		if err != nil {
-			return nil, err
+	for _, host := range hosts {
+		if ctx.Err() != nil {
+			return nil, &QoderChatError{Kind: QoderFailClient, Msg: "客户端已断开"}
 		}
-		h, err := sess.headers(encoded, rawURL, dev, modelKey, true)
-		if err != nil {
-			return nil, err
+		s, err := qoderChatOpenHost(ctx, host, sess, dev, modelKey, encoded, opts)
+		if err == nil {
+			return s, nil
 		}
-		req.Header = h
-		client := &http.Client{Timeout: 600 * time.Second}
-		resp, err := client.Do(req)
-		if err != nil {
-			lastErr = err
-			continue
+		lastErr = err
+		if ce, ok := err.(*QoderChatError); ok {
+			switch ce.Kind {
+			case QoderFailClient, QoderFailCredits, QoderFailAuth, QoderFailRate:
+				return nil, ce
+			}
 		}
-		if resp.StatusCode != http.StatusOK {
-			detail, _ := io.ReadAll(io.LimitReader(resp.Body, 600))
-			_ = resp.Body.Close()
-			lastErr = fmt.Errorf("qoder: 上游 HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(detail)))
-			continue
-		}
-		return resp, nil
 	}
 	if lastErr == nil {
-		lastErr = errors.New("qoder: 无可用网关主机")
+		lastErr = &QoderChatError{Kind: QoderFailTransport, Msg: "无可用网关主机"}
 	}
 	return nil, lastErr
 }
 
-// QoderForEachInnerChunk 解包上游 SSE 信封：statusCodeValue!=200 报错；
-// body=="[DONE]" 正常结束；其余内层 OpenAI chunk JSON 原样交给 fn。
-func QoderForEachInnerChunk(resp *http.Response, fn func(chunk string) error) error {
-	sc := bufio.NewScanner(resp.Body)
+// qoderChatOpenHost 对单个网关主机发请求 + 探首帧。
+func qoderChatOpenHost(ctx context.Context, host string, sess *qoderCosySession, dev *QoderDevice,
+	modelKey, encoded string, opts QoderChatOptions) (*QoderChatStream, error) {
+	rawURL := host + qoderChatPath
+	// 独立 cancel：看门狗超时/客户端断连都要能掐断上游生成（否则白烧积分）。
+	reqCtx, cancel := context.WithCancel(ctx)
+	fail := func(kind QoderChatFailKind, status int, msg string) (*QoderChatStream, error) {
+		cancel()
+		return nil, &QoderChatError{Kind: kind, Status: status, Host: host, Msg: msg}
+	}
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, rawURL, strings.NewReader(encoded))
+	if err != nil {
+		return fail(QoderFailTransport, 0, err.Error())
+	}
+	h, err := sess.headers(encoded, rawURL, dev, modelKey, true)
+	if err != nil {
+		return fail(QoderFailAuth, 0, err.Error())
+	}
+	req.Header = h
+	// 不设总超时：长流不能被 600s 硬上限误杀，改由响应头超时（Transport）
+	// + 首帧/流中空闲看门狗兜底。
+	client, err := qoderHTTPClient(dev, 0)
+	if err != nil {
+		return fail(QoderFailTransport, 0, err.Error())
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		kind := QoderFailTransport
+		if ctx.Err() != nil {
+			kind = QoderFailClient
+		}
+		return fail(kind, 0, err.Error())
+	}
+	if resp.StatusCode != http.StatusOK {
+		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 600))
+		_ = resp.Body.Close()
+		return fail(classifyQoderStatus(resp.StatusCode), resp.StatusCode, strings.TrimSpace(string(detail)))
+	}
+	wd := newQoderIdleWatchdog(cancel, opts.FirstEventTimeout)
+	sc := newQoderEnvelopeScanner(resp.Body)
+	chunk, done, err := sc.next()
+	if err != nil {
+		wd.stop()
+		_ = resp.Body.Close()
+		if ce, ok := err.(*QoderChatError); ok {
+			ce.Host = host
+			if wd.timedOut() && ctx.Err() == nil {
+				ce.Kind, ce.Msg = QoderFailTransport, "首帧等待超时: "+ce.Msg
+			}
+			cancel()
+			return nil, ce
+		}
+		kind := QoderFailTransport
+		if ctx.Err() != nil {
+			kind = QoderFailClient
+		} else if wd.timedOut() {
+			err = fmt.Errorf("首帧等待超时: %w", err)
+		}
+		return fail(kind, 0, err.Error())
+	}
+	wd.touch(opts.IdleTimeout)
+	qoderChatClearHost(host)
+	return &QoderChatStream{
+		Resp: resp, sc: sc, first: chunk, firstDone: done,
+		host: host, cancel: cancel, wd: wd, idle: opts.IdleTimeout,
+	}, nil
+}
+
+// qoderEnvelopeScanner 上游 SSE 信封逐帧读取器。
+type qoderEnvelopeScanner struct {
+	sc *bufio.Scanner
+}
+
+func newQoderEnvelopeScanner(r io.Reader) *qoderEnvelopeScanner {
+	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
-	for sc.Scan() {
-		line := sc.Text()
+	return &qoderEnvelopeScanner{sc: sc}
+}
+
+// next 返回下一个内层 chunk。done=true 表示流正常结束（[DONE] 或 EOF）；
+// 信封 statusCodeValue!=200 返回 *QoderChatError（带状态与详情）。
+func (s *qoderEnvelopeScanner) next() (chunk string, done bool, err error) {
+	for s.sc.Scan() {
+		line := s.sc.Text()
 		data := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "data:"))
 		if data == "" || strings.HasPrefix(line, "event:") {
 			continue
@@ -321,28 +509,59 @@ func QoderForEachInnerChunk(resp *http.Response, fn func(chunk string) error) er
 		if json.Unmarshal([]byte(data), &outer) != nil {
 			continue
 		}
-		switch s := outer.Status.(type) {
+		status := 200
+		switch v := outer.Status.(type) {
 		case nil:
 		case float64:
-			if s != 200 {
-				return fmt.Errorf("qoder: 上游信封状态 %v: %s", s, truncateQoder(outer.Body, 400))
-			}
+			status = int(v)
 		case string:
-			if s != "200" {
-				return fmt.Errorf("qoder: 上游信封状态 %s: %s", s, truncateQoder(outer.Body, 400))
+			if n, cerr := strconv.Atoi(strings.TrimSpace(v)); cerr == nil {
+				status = n
+			} else {
+				status = -1
+			}
+		}
+		if status != 200 {
+			return "", false, &QoderChatError{
+				Kind:   classifyQoderStatus(status),
+				Status: status,
+				Msg:    fmt.Sprintf("信封状态 %d: %s", status, truncateQoder(outer.Body, 400)),
 			}
 		}
 		if outer.Body == "" {
 			continue
 		}
 		if outer.Body == "[DONE]" {
+			return "", true, nil
+		}
+		return outer.Body, false, nil
+	}
+	if err := s.sc.Err(); err != nil {
+		return "", false, err
+	}
+	return "", true, nil
+}
+
+// QoderForEachInnerChunk 解包上游 SSE 信封：statusCodeValue!=200 报错；
+// body=="[DONE]" 正常结束；其余内层 OpenAI chunk JSON 原样交给 fn。
+// 不带首帧探测/看门狗，供裸响应（测试与离线解包）使用；聊天中继走 QoderChatStream。
+func QoderForEachInnerChunk(resp *http.Response, fn func(chunk string) error) error {
+	sc := newQoderEnvelopeScanner(resp.Body)
+	for {
+		chunk, done, err := sc.next()
+		if err != nil {
+			return err
+		}
+		if done {
 			return nil
 		}
-		if err := fn(outer.Body); err != nil {
+		if chunk == "" {
+			continue
+		}
+		if err := fn(chunk); err != nil {
 			return err
 		}
 	}
-	return sc.Err()
 }
 
 func truncateQoder(s string, n int) string {

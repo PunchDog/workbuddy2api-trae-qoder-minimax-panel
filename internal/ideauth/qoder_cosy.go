@@ -19,6 +19,7 @@ package ideauth
 
 import (
 	"bytes"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/md5"
@@ -331,6 +332,12 @@ func QoderGatewayCandidates(realm string) []string {
 // JSON（全字段透传，由调用方映射）。逐主机尝试；任一 200 且非空即成功。
 // 失败返回 error，调用方回落嵌入快照。
 func QoderFetchLiveCatalog(realm string, auth *QoderAuth, dev *QoderDevice) ([]byte, error) {
+	return qoderFetchLiveCatalogCtx(context.Background(), realm, auth, dev)
+}
+
+// qoderFetchLiveCatalogCtx 同 QoderFetchLiveCatalog，但受 ctx 约束（调用方给总预算，
+// 避免「账号数 × 主机数 × 单主机超时」串成分钟级阻塞）。
+func qoderFetchLiveCatalogCtx(ctx context.Context, realm string, auth *QoderAuth, dev *QoderDevice) ([]byte, error) {
 	if auth == nil || strings.TrimSpace(auth.Token) == "" {
 		return nil, errors.New("cosy: 无可用账号凭证")
 	}
@@ -341,8 +348,12 @@ func QoderFetchLiveCatalog(realm string, auth *QoderAuth, dev *QoderDevice) ([]b
 	body := qoderCustomEncode([]byte("{}"))
 	var lastErr error
 	for _, host := range QoderGatewayCandidates(realm) {
+		if err := ctx.Err(); err != nil {
+			lastErr = err
+			break
+		}
 		rawURL := host + "/algo/api/v2/model/list?Encode=1"
-		req, err := http.NewRequest(http.MethodGet, rawURL, strings.NewReader(body))
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, strings.NewReader(body))
 		if err != nil {
 			return nil, err
 		}
@@ -351,7 +362,10 @@ func QoderFetchLiveCatalog(realm string, auth *QoderAuth, dev *QoderDevice) ([]b
 			return nil, err
 		}
 		req.Header = h
-		client := &http.Client{Timeout: 15 * time.Second}
+		client, err := qoderHTTPClient(dev, 15*time.Second)
+		if err != nil {
+			return nil, err
+		}
 		resp, err := client.Do(req)
 		if err != nil {
 			lastErr = err

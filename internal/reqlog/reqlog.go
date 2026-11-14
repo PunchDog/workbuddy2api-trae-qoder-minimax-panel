@@ -82,8 +82,15 @@ type Event struct {
 	// 上游未回该维度时两者皆零值省略；hit=0 + miss>0 即整段未命中。
 	CacheHitTokens  int64  `json:"cache_hit_tokens,omitempty"`
 	CacheMissTokens int64  `json:"cache_miss_tokens,omitempty"`
-	ClientIP        string `json:"client_ip,omitempty"`
-	UserAgent       string `json:"user_agent,omitempty"`
+	// Stream 是否流式响应（非 chat 路径恒 false）。
+	Stream bool `json:"stream"`
+	// BodyBytes 入站请求体字节数：判断「解析开销是否值得优化」的量级依据。
+	BodyBytes int `json:"body_bytes,omitempty"`
+	// GatewayPrepareMs 网关入口派生耗时（读 body 完成 → 交给通道/进轮转循环前）。
+	// 不含上游等待，用于把网关自身开销与 TTFB 分离。
+	GatewayPrepareMs int64  `json:"gateway_prepare_ms,omitempty"`
+	ClientIP         string `json:"client_ip,omitempty"`
+	UserAgent        string `json:"user_agent,omitempty"`
 }
 
 // Filter 用于从归档中筛选最近记录。字符串字段一律「包含」匹配（大小写不敏感），
