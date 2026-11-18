@@ -7,15 +7,12 @@ import (
 	"net/http"
 	"sort"
 	"time"
-
-	"github.com/linguo2625469/workbuddy2api-panel/internal/clockskew"
 )
 
 // 本机时钟核对闸。
 //
 // 为什么必须单独做这一件事：这套面板里所有「每天」的判定都是按**本机时钟**算的 ——
 // 签到时点（9/10/21 点）、Qoder 签到记录的 10:05 可信线（ideauth.checkinTrustLine）、
-// CodeArts 的每日幂等键（codearts.DailyIdempotentKey 用本地 yyyymmdd）、
 // 「今日已签」的自然日比较（ideauth.CheckedInToday）。本机钟只要偏几小时，
 // 这些判定就会成片错位：真领到的签到被记成「10:05 前的旧版误报」而整天显示没签上、
 // 自动签到在错误的时刻触发、跨天的领取被判成重复。
@@ -70,9 +67,6 @@ func checkClockSkew(ctx context.Context) {
 		log.Printf("时钟核对跳过：拿不到任何上游时间源（%v）", err)
 		return
 	}
-	/* 把偏差共享出去：CodeArts 的票据临期判定要用校准后的时间，
-	   否则钟快 8 小时会提前把票据判死 → 静默续期被跳过 → 每次都要重新登录。 */
-	clockskew.SetSkew(skew)
 	abs := skew
 	if abs < 0 {
 		abs = -abs

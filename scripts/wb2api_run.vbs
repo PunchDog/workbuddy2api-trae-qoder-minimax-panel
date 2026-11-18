@@ -30,7 +30,7 @@
 '
 '  The 5-minute repetition trigger on the task then doubles as a watchdog:
 '  if wb2api.exe dies, the next tick restarts it with no human involved.
-'  That matters because CodeArts / Huawei Cloud sessions are idle-timeout
+'  That matters because some upstream sessions are idle-timeout
 '  based: they only survive while the server keeps polling.
 '
 '  Log: D:\WorkBuddy\data\wb2api.out.log / wb2api.err.log

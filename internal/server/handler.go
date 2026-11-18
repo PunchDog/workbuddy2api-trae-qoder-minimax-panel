@@ -89,6 +89,9 @@ type Config struct {
 	// MMAPI MiniMax 开放平台通道（OpenAI 兼容 + API Key，按组前缀如 mm: / mms:）。
 	// nil = 未配置密钥。
 	MMAPI *mmapi.Registry
+	// OpenCode opencode-go 透明转发通道（独立路径 /opencode/v1/*）。
+	// 与号池完全无关：不参与选号/用量/冷却，Authorization 由调用方提供（上游凭据）。
+	OpenCode OpenCodeConfig
 }
 
 // loadLive 返回当前运行期快照；Live 为 nil 时用静态字段合成。
@@ -144,6 +147,10 @@ type Handler struct {
 	// （进程内短期，惰性创建）。
 	respStoreOnce sync.Once
 	respStoreInst *respStore
+	// opencodeClientOnce/opencodeClientInst：opencode-go 转发的 HTTP 客户端
+	// （SSE 长流不设整体超时，只限时等响应头；惰性创建避免测试构造负担）。
+	opencodeClientOnce sync.Once
+	opencodeClientInst *http.Client
 }
 
 // baseCtx 返回进程级后台上下文（首个调用时创建，永不取消）。
@@ -189,6 +196,10 @@ func NewHandler(cfg Config) *Handler {
 	h.mux.HandleFunc("GET /v1/models", h.withAuth(h.models))
 	h.mux.HandleFunc("GET /status", h.withAuth(h.status))
 	h.mux.HandleFunc("GET /healthz", h.healthz)
+	// opencode-go 透明转发通道：独立前缀，与 /v1/* 号池路由互不影响。
+	// 不套 withAuth——调用方（WorkBuddy/Qoder）填的是 opencode 上游 Key，
+	// Authorization 由转发层原样送上游（见 opencode.go）。
+	h.mux.HandleFunc(openCodePathPrefix+"/", h.opencodeProxy)
 	if cfg.Panel != nil {
 		h.mux.Handle("/panel/", cfg.Panel) // /panel → /panel/ 由 ServeMux 自动重定向
 	}
@@ -651,7 +662,10 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	// 会话粘性：从请求体提取会话键并解析绑定号（找不到/无效则 stickyUID 为空，走普通轮换）。
 	// ExtractKey 与粘性开关解耦（issue #35 侧）：关闭粘性时会话头族的聚合主键仍按
 	// 会话级（RequestIDForKey(sessKey)），不悄悄退化成轮级——提取本身与粘性无关。
-	sessKey := session.ExtractKey(body)
+	// x-opencode-session：opencode 对所有 provider 发送的会话标识（请求体不带 conversation_id），
+	// 无 body 显式会话键时作为会话键，并原样透传上游（见 ChatMeta.OpencodeSession）。
+	opencodeSession := upstream.SanitizeOpencodeSession(r.Header.Get(upstream.OpencodeSessionHeader))
+	sessKey := session.ExtractKeyWithSession(body, opencodeSession)
 	stickyUID := ""
 	if h.cfg.Session != nil && sessKey != "" {
 		// 按模型解析：绑定号在**当前模型**被 6004 限额时视为不可用 → 重新分配，
@@ -810,9 +824,12 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	// prefix-cache slot.
 	convID := session.ResolveConversationID(body)
 	if convID == "" {
+		convID = opencodeSession
+	}
+	if convID == "" {
 		convID = sessKey
 	}
-	chatMeta := upstream.ChatMeta{ConversationID: convID}
+	chatMeta := upstream.ChatMeta{ConversationID: convID, OpencodeSession: opencodeSession}
 	if v := r.Header.Get("X-Conversation-Request-ID"); v != "" {
 		chatMeta.ConversationRequestID = v
 	} else if turnKey != "" && sessKey != "" {

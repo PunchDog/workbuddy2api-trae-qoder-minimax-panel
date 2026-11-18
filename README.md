@@ -1,16 +1,16 @@
 <p align="center">
-  <img src="assets/social-preview.png" alt="WorkBuddy2API Panel — WorkBuddy / CodeBuddy / Trae / Qoder / MiniMax / 豆包 Doubao / 华为云 CodeArts 码道 多账号合集 → 统一 OpenAI 兼容网关" width="100%">
+  <img src="assets/social-preview.png" alt="WorkBuddy2API Panel — WorkBuddy / CodeBuddy / Trae / Qoder / MiniMax / 豆包 Doubao 多账号合集 → 统一 OpenAI 兼容网关" width="100%">
 </p>
 
 <h1 align="center">WorkBuddy2API Panel</h1>
 
 <p align="center">
-  <b>一个面板，统管 WorkBuddy / CodeBuddy / Trae / Qoder / MiniMax / 豆包 / 华为云 CodeArts 全部账号 → 统一 OpenAI 兼容网关</b><br>
+  <b>一个面板，统管 WorkBuddy / CodeBuddy / Trae / Qoder / MiniMax / 豆包 全部账号 → 统一 OpenAI 兼容网关</b><br>
   Web 面板 · OAuth 浏览器登录 · 账号池轮转 · 熔断与冷却 · 会话粘性 · 定时签到 / 活跃 / 旅行 / 保活 · <b>成长任务一键完成（17/18）</b> · 流式 / 非流式
 </p>
 
 <p align="center">
-  <b>Multi-platform AI account hub: WorkBuddy · CodeBuddy · Trae · Qoder · MiniMax · Doubao · Huawei Cloud CodeArts — one OpenAI-compatible gateway + web panel.</b><br>
+  <b>Multi-platform AI account hub: WorkBuddy · CodeBuddy · Trae · Qoder · MiniMax · Doubao — one OpenAI-compatible gateway + web panel.</b><br>
   Account pool rotation · circuit breaker · session stickiness · daily check-in / keep-alive for every platform · one-click growth tasks.
 </p>
 
@@ -49,7 +49,6 @@
 > | **Qoder** | IDE 账号池 | 账号管理、切号、签到（**每日额度按账号各发一份**，服务端判同人才只发一份）、积分、凭证自动续期 |
 > | **MiniMax Code** | 账号池 | **浏览器登录**（OAuth 设备码 + S256 PKCE，无需本机客户端）、签到、积分、**凭证自动续期**（1h token / 轮换 RT 双向同步客户端）、模型通道（`minimax:` 前缀） |
 > | **豆包（Doubao）** | Cookie 签到池 | 签到（CDP 无头浏览器通道）、多账号、客户端 Cookie 一键提取 / 手动粘贴 |
-> | **华为云 CodeArts（码道）** | Cookie 签到池 | 浏览器登录抓取会话、每日领取签到、**积分总览**（每天可领 / 剩余 / 将过期）、多账号各自独立会话 |
 >
 > - 面板左侧「**IDE 账号池**」视图统管 Qoder / Trae IDE / WorkBuddy 三套客户端账号（添加、切号、移除、积分、签到）。
 > - 面板「**签到池**」视图的「**一键签到**」一个按钮覆盖 **主号池 + WorkBuddy + Qoder + MiniMax + Trae + 豆包** 全部平台，并按平台分别统计成功 / 已签 / 失败。
@@ -58,17 +57,17 @@
 
 > ### 🔎 这个仓库能做什么（关键词索引）
 >
-> - **WorkBuddy / CodeBuddy 账号池**、**Trae IDE 账号**、**Qoder 账号**、**MiniMax Code 账号**、**豆包 Doubao 签到**、**华为云 CodeArts 码道签到**
+> - **WorkBuddy / CodeBuddy 账号池**、**Trae IDE 账号**、**Qoder 账号**、**MiniMax Code 账号**、**豆包 Doubao 签到**
 > - **多账号合集 / 账号池轮转 / 一键切号 / 断路冷却 / 会话粘性**
 > - **每日签到 / 自动签到 / 批量签到 / 保活 / 积分查看**
 > - **OpenAI 兼容网关**、**OpenAI 兼容 API**、`/v1/chat/completions`、`/v1/responses`、**SSE 流式**
 > - **Go 实现**、**单文件部署**、**Docker**、**Web 管理面板**
 >
-> Search keywords: `workbuddy` `workbuddy2api` `codebuddy` `codebuddy2api` `trae` `trae2api` `qoder` `qoder2api` `minimax` `minimax code` `doubao` `codearts` `码道` `openai api gateway` `ai account pool` `daily check-in` `auto check-in` `keep-alive` `openai compatible api` `reverse proxy` `admin panel` `golang`
+> Search keywords: `workbuddy` `workbuddy2api` `codebuddy` `codebuddy2api` `trae` `trae2api` `qoder` `qoder2api` `minimax` `minimax code` `doubao` `openai api gateway` `ai account pool` `daily check-in` `auto check-in` `keep-alive` `openai compatible api` `reverse proxy` `admin panel` `golang`
 
 > ### 🆚 和「只做 WorkBuddy」的面板差在哪
 >
-> 多数同类面板只做 WorkBuddy 主号池；本项目把 **Trae、Qoder、MiniMax、豆包、华为云 CodeArts** 也接了进来：
+> 多数同类面板只做 WorkBuddy 主号池；本项目把 **Trae、Qoder、MiniMax、豆包** 也接了进来：
 >
 > | 你会搜的 | 本项目里对应的东西 |
 > |---|---|
@@ -76,7 +75,6 @@
 > | **Qoder 签到** / Qoder 免费额度 / Qoder 多账号 / Qoder 换号 | 每日额度按**账号**各发一份（2026-11-04 实测：两号 grantId / 领取时刻 / 余额各自独立）；只有服务端判同人才只发一份，凭证自动续期 |
 > | **MiniMax 签到** / MiniMax Code / MiniMax 接入 / minimax 模型 | 浏览器 OAuth 设备码登录（免装客户端），`minimax:` 前缀直通模型 |
 > | **豆包签到** / Doubao 多账号 / doubao 签到 | Cookie 签到池 + 无头浏览器通道，客户端 Cookie 一键提取 |
-> | **CodeArts 签到** / 码道签到 / 华为云码道 / CodeArts 积分 | 每日领取 + **积分总览**（每天能领多少 / 一共还剩多少 / 将过期） |
 >
 > 只想管一个 WorkBuddy 号的话，别的面板更轻；**手上同时有这几种账号的，只有这里是一块面板统管**。
 
@@ -456,6 +454,74 @@ curl -s http://localhost:7863/v1/chat/completions \
   -H "Authorization: Bearer your-api-key" \
   -H "Content-Type: application/json" \
   -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}],"stream":false}'
+```
+
+### 接入 opencode（终端编码代理）
+
+[opencode](https://opencode.ai) 是开源终端 AI 编码代理，支持自定义 OpenAI 兼容 provider——把它的 `baseURL` 指向本网关即可用上号池里全部平台的模型，**面板零改动**。
+
+opencode 不会自动拉取自定义 provider 的模型目录，需要在 `opencode.json` 里显式登记模型；本仓库提供生成脚本，直接读面板 `/v1/models` 产出配置（含 realm 前缀、上下文窗口与工具/多模态/推理能力旗标）：
+
+```bash
+# 1) 安装 opencode（任选其一）
+npm i -g opencode-ai        # 或 brew install sst/tap/opencode
+
+# 2) 注入面板 API Key（config.json 里的 api_key 值）
+export WORKBUDDY_API_KEY=your-api-key
+
+# 3) 生成配置（面板非本机时加 --base-url http://<host>:7863）
+node scripts/gen-opencode-config.mjs --out opencode.json
+
+# 4) 在目标项目目录启动 opencode，/models 里选 workbuddy/* 模型
+opencode
+```
+
+- 生成的 `opencode.json` **不含真实密钥**：`apiKey` 用 `{env:WORKBUDDY_API_KEY}` 占位，opencode 运行时从环境变量取——所以每次启动 opencode 前都要保证该变量已设置。
+- 脚本输出 **OpenCode V2 原生形状**（`providers` / `package` / `settings` / `capabilities`）。V1 的 `provider`（单数）/ `npm` / `options` 在 V2 走自动迁移，其中 `attachment`、`reasoning` 会被 V2 显式忽略（能力静默丢失），因此不再生成 V1 形状。
+- 模型名保留 realm 前缀（`cn:` / `global:` / `trae:` / `minimax:` / `qoder-cn:` / `qoder-intl:`），引用形如 `workbuddy/cn:auto`。
+- 默认模型自动选 `is_default` 且支持工具调用的条目（opencode 的 agent 循环依赖工具调用）。
+- **号池或模型目录变化后重跑脚本即可**；脚本对空目录/鉴权失败会如实报错退出，不生成假名单。
+- opencode 对所有 provider 发送的 `x-opencode-session`（值为会话 ID）会被面板识别：映射为会话标识（注入上游 `X-Conversation-ID`）、作为会话粘性键（同一会话多轮复用同一账号），并原样透传 `X-Opencode-Session` 给上游。请求体自带 `conversation_id` / `prompt_cache_key` 时以 body 值为准。
+- 不接号池的 opencode-go 直连场景见下节 `/opencode/v1` 转发通道。
+
+### opencode-go 转发通道 `/opencode/v1`
+
+把 `https://opencode.ai/inference/go/v1`（opencode 的 Go 订阅推理端点）以 OpenAI 兼容形态透传出来，**自动注入 `x-opencode-session`**——WorkBuddy / Qoder 这类客户端不会自己发该头，直连 Go 会 400 `MissingSessionID`。
+
+```text
+客户端 baseURL: http://127.0.0.1:7863/opencode/v1
+  → POST /opencode/v1/chat/completions → https://opencode.ai/inference/go/v1/chat/completions
+  → GET  /opencode/v1/models           → https://opencode.ai/inference/go/v1/models
+```
+
+- 会话头取值：客户端自带 `x-opencode-session` 优先（清洗后）；否则从 body 的 `conversation_id` / `prompt_cache_key` / 内容派生键生成，保证同一会话多轮复用同一 session；都没有时生成随机值兜底。恒非空。
+- 鉴权：这条路径**不套网关 api_key 鉴权**，调用方的 `Authorization` 原样透传上游（填 `OPEN_CODE_TOKEN_PLAN_API_KEY`）。头为空或填了网关自己的 key 时，服务端用环境变量 `OPEN_CODE_TOKEN_PLAN_API_KEY` 顶替，避免把网关 key 泄露给第三方。
+- 与号池完全隔离：不参与选号、用量统计、冷却与熔断，`/v1/models` 也不会混入 opencode-go 模型。
+- 配置：`opencode.enabled`（缺省 true）、`opencode.base_url`（缺省官方端点）、`opencode.timeout`（缺省 300s，只限时等响应头，不掐 SSE 长流）；对应环境变量 `WB2A_OPENCODE_ENABLED` / `WB2A_OPENCODE_BASE_URL` / `WB2A_OPENCODE_TIMEOUT`。`opencode.enabled=false` 时该路径返回 503。
+- 不想跑脚本也可以手写最小配置（模型名自行从 `/v1/models` 抄）：
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "workbuddy/cn:auto",
+  "providers": {
+    "workbuddy": {
+      "name": "WorkBuddy2API Panel",
+      "package": "@opencode/ai/providers/openai-compatible",
+      "settings": {
+        "baseURL": "http://localhost:7863/v1",
+        "apiKey": "{env:WORKBUDDY_API_KEY}"
+      },
+      "models": {
+        "cn:auto": {
+          "name": "Auto",
+          "capabilities": { "tools": true, "input": ["text"], "output": ["text"] },
+          "limit": { "context": 1000000, "output": 32000 }
+        }
+      }
+    }
+  }
+}
 ```
 
 ## 配置说明
@@ -1148,7 +1214,6 @@ sudo chown -R 10001:10001 ./auths ./data ./config.json
 |---|---|---|
 | `archive/qoder2api/` | qoder2api | Qoder → OpenAI / Claude / Codex 兼容网关，附注册链路与风控逆向研究（`docs/registration-research/`：bundle 快照、阿里云验证码 / baxia 处罚页分析、注册自动化脚本） |
 | `archive/qoder2api-hub/` | qoder2api-hub | Qoder 本地多账号网关（Python）：账号池、模型目录、定价、i18n、任务调度、面板 |
-| `archive/codearts2api/` | codearts2api | 华为云 CodeArts 码道 → OpenAI 兼容层，附接口逆向文档 |
 | `archive/Trae2api-cn/` | Trae2api-cn | Trae 国内版中转（Python），附发布记录与原生辅助组件 |
 | `archive/workbuddy2api-panel/` | workbuddy2api-panel | 面板的早期 Go 版实现（`cmd/server` / `internal/upstream` / `internal/pool` / `internal/panel`），当前实现由它演进而来 |
 | `archive/TraeWorkAssistant/` | TraeWorkAssistant | 桌面端完整实现（Tauri + Rust + React），附产品设计 / 已完成 / 待办文档全集 |

@@ -7,7 +7,7 @@ import (
 
 // 回归：可信分界线曾是一条**全局**的「今日 10:05」线，那是 Qoder 专属规则
 // （Qoder 每日活动 10:00 刷新，10:05 前写下的记录可能只是昨天那波陈旧活动）。
-// 豆包 / WorkBuddy / CodeArts 的每日签到是**自然日**刷新，被套上同一条线后，
+// 豆包 / WorkBuddy 的每日签到是**自然日**刷新，被套上同一条线后，
 // 上午就签到成功的号在面板上一整天显示「未签」，按钮一直是蓝底可点 —— 用户
 // 看到的就是「签到失效」（2026-10-27 实测：08:47 豆包两个号签到成功，
 // /panel/api/ide/doubao/accounts 仍返回 checked_in_today=false）。
@@ -47,9 +47,8 @@ func TestCheckinTrustLinePerPlatform(t *testing.T) {
 		{"doubao", "d3", todayAt(t, 9, 0), true, "豆包 09:00 的签到记录应可信"},
 		// 豆包：旧格式纯日期记录 = 那天签的，自然日平台可信。
 		{"doubao", "d4", time.Now().Format("2006-01-02"), true, "豆包纯日期记录应按当日可信"},
-		// WorkBuddy / CodeArts 同理（自然日刷新）。
+		// WorkBuddy 同理（自然日刷新）。
 		{"workbuddy", "w1", todayAt(t, 7, 30), true, "WorkBuddy 07:30 的签到记录应可信"},
-		{"codearts", "c1", todayAt(t, 7, 30), true, "CodeArts 07:30 的签到记录应可信"},
 		// Qoder 保持 10:05 线不变（活动 10:00 刷新），且线在 **UTC+8** 上。
 		{"qoder", "q1", todayAtIn(t, qoderCST, 9, 0), false, "Qoder 10:05 前写入的记录不可信"},
 		{"qoder", "q2", todayAtIn(t, qoderCST, 11, 0), true, "Qoder 10:05 后写入的记录可信"},
@@ -67,7 +66,7 @@ func TestCheckinRecordTrustedRejectsYesterday(t *testing.T) {
 	t.Setenv("IDEAUTH_POOL_DIR", dir)
 
 	// 昨天的记录在任何平台都不可信（自然日平台也不能拿昨天的当今天）。
-	for _, kind := range []string{"doubao", "workbuddy", "codearts", "qoder"} {
+	for _, kind := range []string{"doubao", "workbuddy", "qoder"} {
 		key := kind + "-yesterday"
 		// 「昨天」按该平台的时区基准取（Qoder 是 UTC+8，其余是本地），否则在
 		// 非本地时区机器上这条记录可能仍落在「今天」。
@@ -86,7 +85,7 @@ func TestCheckinRecordTrustedRejectsYesterday(t *testing.T) {
 func TestCheckinRecordTrustedWithoutRecord(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("IDEAUTH_POOL_DIR", dir)
-	for _, kind := range []string{"doubao", "workbuddy", "codearts", "qoder"} {
+	for _, kind := range []string{"doubao", "workbuddy", "qoder"} {
 		if CheckinRecordTrusted(kind, "nobody") {
 			t.Errorf("%s：没有记录时不应算已签", kind)
 		}

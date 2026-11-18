@@ -91,5 +91,12 @@
     "enabled": true,
     "data_dir": "",
     "auto_hours": [9, 21]
+  },
+  "opencode": {
+    "enabled": true,
+    "base_url": "https://opencode.ai/inference/go/v1",
+    "timeout": "300s",
+    "api_key": "",
+    "usage_url": "https://opencode.ai/zen/go/v1/usage"
   }
 }

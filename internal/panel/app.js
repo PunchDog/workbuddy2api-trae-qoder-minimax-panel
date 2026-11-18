@@ -459,10 +459,10 @@ function go(v) {
   if (v === 'models') { if (!$('mdBody').children.length) loadModels(); loadModelQueue(); }
   if (v === 'config') loadConfig();
   if (v === 'logs') loadLogs();
-  if (v === 'usage') { loadUsage(); loadUsageOfficial(); loadUsageQoder(); }
+  if (v === 'usage') { loadUsage(); loadUsageOfficial(); loadUsageOpenCode(); loadUsageQoder(); }
   if (v === 'packages') { loadPackages(); loadPkIdea(true); }
   if (v === 'taskscenter') { reattachQueueView(); loadIdeaTasks(true); }
-  if (v === 'checkin') { loadTraeStatus(true); loadTraeCredits(true); loadCheckinPool(true); loadQkCredits(true); loadWkCredits(true); loadMmCredits(true); loadCaCredits(true); }
+  if (v === 'checkin') { loadTraeStatus(true); loadTraeCredits(true); loadCheckinPool(true); loadQkCredits(true); loadWkCredits(true); loadMmCredits(true); }
   // 冻结期内进 IDE 账号页不自动重取：保留切换前那份列表与滚动位置。
   if (v === 'ideaccounts' && !viewFrozen()) { loadQoderAccounts(true); loadTraeIdeAccounts(true); loadWorkBuddyAccounts(true); }
   saveViewState();
@@ -1271,6 +1271,7 @@ const CFG_MAP = {
   session_sticky_enabled: ['session_sticky', 'enabled'],
   trae_enabled: ['trae', 'enabled'], trae_auto_hours: ['trae', 'auto_hours'],
   request_client_info: ['logging', 'request_client_info'],
+  opencode_api_key: ['opencode', 'api_key'],
 };
 /* 「覆盖型」文本字段：空串本身是有意义的取值（= 回落到内置默认），必须照发。
  *
@@ -1280,10 +1281,11 @@ const CFG_MAP = {
  * 但覆盖型字段正好相反：清空 = 明确要求回到默认。漏发它们会让面板显示"已保存"
  * 而值其实没变（issue #102 附带发现 2：user_agent 清空后 config.json 里仍是旧值）。
  *
- * 刻意不含 api_key：清空它 = 关闭整个鉴权，误触代价是网关变成无鉴权公开服务。
+ * 刻意不含网关 api_key：清空它 = 关闭整个鉴权，误触代价是网关变成无鉴权公开服务。
  * 该字段（以及提示文案"留空 = 不鉴权"与现状不符的问题）单独处理。
+ * opencode_api_key 不同：清空 = 不再查 OpenCode 用量，是可撤回的正常操作，故列入。
  */
-const CLEARABLE_CFG = new Set(['user_agent', 'prompt_file']);
+const CLEARABLE_CFG = new Set(['user_agent', 'prompt_file', 'opencode_api_key']);
 
 function dig(obj, path) { return path.reduce((o, k) => (o == null ? undefined : o[k]), obj); }
 function put(obj, path, val) {
@@ -1368,6 +1370,12 @@ $('btnEye').onclick = () => {
   el.type = show ? 'text' : 'password';
   $('btnEye').textContent = show ? '隐藏' : '显示';
 };
+if ($('btnOpenCodeEye')) $('btnOpenCodeEye').onclick = () => {
+  const el = $('cfgOpenCodeKey');
+  const show = el.type === 'password';
+  el.type = show ? 'text' : 'password';
+  $('btnOpenCodeEye').textContent = show ? '隐藏' : '显示';
+};
 $('btnCfgReload').onclick = loadConfig;
 $('cfgForm').onsubmit = async ev => {
   ev.preventDefault();
@@ -1410,7 +1418,6 @@ function openAdd() {
   resetQoderPanel();
   resetMinimaxAddPanel();
   resetDoubaoAddPanel();
-  resetCodeArtsAddPanel();
   stopPoll(); stopTraePoll();
 }
 function switchAddTab(tab) {
@@ -1420,7 +1427,6 @@ function switchAddTab(tab) {
   $('addTabQoder').hidden = tab !== 'qoder';
   $('addTabMinimax').hidden = tab !== 'minimax';
   $('addTabDoubao').hidden = tab !== 'doubao';
-  $('addTabCodearts').hidden = tab !== 'codearts';
   $('addTabImport').hidden = tab !== 'import';
   // 页脚那组按钮只服务 WorkBuddy 设备码流程；其它流程有自己的按钮（在面板内）。
   const wb = tab === 'wb';
@@ -2141,8 +2147,8 @@ function reloadCurrentView(skipOverview) {
   if (view === 'ideaccounts') { loadQoderAccounts(true); loadTraeIdeAccounts(true); loadWorkBuddyAccounts(true); }
   else if (view === 'logs') loadLogs();
   else if (view === 'taskscenter') { reattachQueueView(); loadIdeaTasks(true); }
-  else if (view === 'checkin') { loadTraeStatus(true); loadTraeCredits(true); loadCheckinPool(true); loadQkCredits(true); loadWkCredits(true); loadMmCredits(true); loadCaCredits(true); }
-  else if (view === 'usage') { loadUsage(); loadUsageOfficial(); loadUsageQoder(); }
+  else if (view === 'checkin') { loadTraeStatus(true); loadTraeCredits(true); loadCheckinPool(true); loadQkCredits(true); loadWkCredits(true); loadMmCredits(true); }
+  else if (view === 'usage') { loadUsage(); loadUsageOfficial(); loadUsageOpenCode(); loadUsageQoder(); }
   else if (view === 'packages') { loadPackages(); loadPkIdea(true); }
   else if (view === 'models') { loadModels(); loadModelQueue(); }
   restoreScrollTo(y);
@@ -2817,7 +2823,7 @@ async function loadTraeCredits(quiet) {
     st.hidden = false; st.className = 'state err'; st.textContent = e.message;
   }
 }
-if ($('btnTcRefresh')) $('btnTcRefresh').onclick = () => { loadTraeCredits(false); loadQkCredits(false); loadWkCredits(false); loadMmCredits(false); loadCaCredits(false); };
+if ($('btnTcRefresh')) $('btnTcRefresh').onclick = () => { loadTraeCredits(false); loadQkCredits(false); loadWkCredits(false); loadMmCredits(false); };
 
 /* ── 精简 QR 编码器（券码二维码用）────────────────────────────────────
    规格子集：byte 模式、ECC L、版本 1-5（全部单纠错块，免块交织）、固定掩码 0。
@@ -3978,6 +3984,53 @@ function renderOfficialChart(series) {
 
 if ($('btnUsageOfficial')) $('btnUsageOfficial').onclick = loadUsageOfficial;
 if ($('usOffWindow')) $('usOffWindow').onchange = loadUsageOfficial;
+
+/* ── OpenCode 用量（订阅配额）─────────────────────────────────────────
+   用 opencode.api_key 查官方 /zen/go/v1/usage。上游只给三个窗口的已用百分比与
+   重置时间（无请求数/积分口径），故单独成卡，不并入下方「官方用量」的计费统计。 */
+async function loadUsageOpenCode() {
+  const btn = $('btnUsageOpenCode');
+  if (btn) { btn.disabled = true; btn.textContent = '读取中…'; }
+  try {
+    renderUsageOpenCode(await api('usage/opencode'));
+  } catch (e) {
+    renderUsageOpenCode({ ok: false, error: e.message });
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '刷新'; }
+  }
+}
+
+function renderUsageOpenCode(d) {
+  const state = $('usOcState'), stats = $('usOcStats'), note = $('usOcNote');
+  if (!state || !stats) return;
+  const windows = (d && d.windows) || [];
+  if (!d || !d.ok || !windows.length) {
+    state.style.display = '';
+    state.className = 'state err';
+    state.textContent = (d && d.error) || '无法查询 OpenCode 用量';
+    stats.innerHTML = '';
+    if (note) note.textContent = '—';
+    return;
+  }
+  state.style.display = 'none';
+  const bar = pct => '<span class="kbar"><i style="width:' + pct.toFixed(1) + '%;background:var(--accent)"></i></span>';
+  const tone = pct => pct >= 90 ? 'c-bad' : pct >= 70 ? 'c-warn' : 'c-ok';
+  stats.innerHTML = windows.map(w => {
+    const pct = Math.max(0, Math.min(100, Number(w.percent || 0)));
+    const limited = w.status === 'rate-limited';
+    const sub = w.reset_at
+      ? '重置 ' + String(w.reset_at).replace('T', ' ').slice(0, 16)
+      : '重置时间未知';
+    return usKpi(pct.toFixed(0) + '%', w.label + (limited ? ' · 已限流' : ''),
+      tone(pct), '剩余 ' + (100 - pct).toFixed(0) + '% · ' + sub, bar(pct));
+  }).join('');
+  if (note) {
+    note.textContent = (d.fetched_at
+      ? '查询于 ' + String(d.fetched_at).replace('T', ' ').slice(0, 16)
+      : '') + ' · OpenCode 官方用量 API';
+  }
+}
+if ($('btnUsageOpenCode')) $('btnUsageOpenCode').onclick = loadUsageOpenCode;
 
 /* ── Qoder 用量（客户端直连额度）─────────────────────────────────────
    官方用量/网关用量两块只统计 WorkBuddy 与经本网关的请求；Qoder 由客户端
@@ -5496,9 +5549,8 @@ async function loadCheckinPool(quiet) {
   if (ckPoolLoading) return;
   ckPoolLoading = true;
   try {
-    // CodeArts 必须在这里调用：漏了它，卡片就永远停在初始的「加载中」。
     await Promise.all([loadCkWorkBuddy(quiet), loadCkQoder(quiet), loadCkMiniMax(quiet),
-      loadCkDoubao(quiet), loadCkCodeArts(quiet)]);
+      loadCkDoubao(quiet)]);
   } finally { ckPoolLoading = false; }
 }
 
@@ -6151,423 +6203,18 @@ async function doMainPoolCheckinAll() {
 }
 
 
-/* ── CodeArts 签到（华为云码道）───────────────────────────────────────
-   凭据是**浏览器 profile**（持久会话）：华为云的网页登录态活不过一小时
-   （SSOTGC / SessionID 是短时票据），把 Cookie 快照存下来第二天注入一律
-   判定未登录（2026-10-27 实测）。所以「添加账号」= 面板用一个全新 profile
-   拉起浏览器，你登录一次；面板把这份 profile 归档到该账号名下，之后每天
-   用它拉一次无头浏览器自动点「活动福利 → 每日领取」。 */
-let caPollTimer = null;
-
-/* ── CodeArts 票据寿命展示（C-UI-REPAIR@1 / C-CA-API@1）────────────────
-   所有字段直接来自 GET ide/codearts/accounts，前端不派生、不自造同义字段。
-   老后端（T2 未上线）没有这些字段时必须降级成「未观测」，绝不显示
-   没有代码路径支撑的采集承诺。 */
-const CA_TICKET_SOURCE = { cookie: '登录采集', probe: '补采探测', session: '会话级', estimate: '估算' };
-const CA_PROBE_STATE = {
-  pending: '待探测', ok: '探测正常', session_only: '仅会话级票据',
-  login_dead: '会话已失效', failed: '探测失败',
-};
-const CA_RENEW_RESULT = {
-  alive: '会话可用', renewed: '已换回新会话', ticket_expired: '票据已过期',
-  needs_login: '需人工登录', failed: '续期失败',
-};
-
-// caTime RFC3339 → 「YYYY-MM-DD HH:mm」；空/非法返回 ''（比较一律按“未知”处理）。
-function caTime(iso) {
-  const ms = parseAPITime(iso);
-  return ms ? fmtLocalDateTime(ms) : '';
-}
-
-// caTicketLines 把票据寿命相关字段转成可读文案（纯函数，前端测试直接抽取）。
-// 判定顺序固定：绝对到期 > 会话级 > 估算 > 未观测。
-function caTicketLines(a) {
-  a = a || {};
-  const lines = [];
-  const deadline = String(a.ticket_deadline || '').trim();
-  const src = String(a.ticket_source || '').trim();
-  if (deadline) {
-    lines.push('票据到期：' + (caTime(deadline) || deadline) + '（' + (CA_TICKET_SOURCE[src] || src || '未知来源') + '）');
-  } else if (src === 'session') {
-    lines.push('票据为会话级（无绝对到期）；会话失效时会尝试续期');
-  } else if (src === 'estimate') {
-    lines.push('票据寿命为估算（仅供展示，不代表真实到期）');
-  } else {
-    // 契约 2.2.17：空 deadline + 空 source 时文案只能是这一句。
-    lines.push('票据寿命未观测（可点补采）');
-  }
-  const sess = caTime(a.session_expires_at);
-  if (sess) lines.push('会话约至 ' + sess + '（估算）');
-  const okAt = caTime(a.last_ok_at);
-  if (okAt) lines.push('上次成功 ' + okAt);
-  const nextAt = caTime(a.renew_next_at);
-  if (nextAt) lines.push('下次续期检查 ' + nextAt);
-  if (a.renew_result) {
-    lines.push('上次续期：' + (CA_RENEW_RESULT[a.renew_result] || a.renew_result));
-  }
-  if (a.renew_fail_msg) lines.push('续期失败原因：' + a.renew_fail_msg);
-  if (a.probe_state || a.probe_msg) {
-    const ps = a.probe_state ? (CA_PROBE_STATE[a.probe_state] || a.probe_state) : '未探测';
-    lines.push('探测状态：' + ps + (a.probe_msg ? '（' + a.probe_msg + '）' : ''));
-  }
-  if (a.expires_known_count !== undefined || a.session_cookie_count !== undefined) {
-    lines.push('已观测过期 ' + Number(a.expires_known_count || 0) + ' 条 · 会话级 ' + Number(a.session_cookie_count || 0) + ' 条');
-  }
-  if (a.can_auto_renew === false && !a.needs_manual) lines.push('当前不可自动续期');
-  return lines;
-}
-
-// CodeArts 三个新增动作：路径与 phase 成功集合见 C-CA-API@1 / C-CA-RENEW@1。
-const CA_ACTIONS = {
-  probe: { path: 'ide/codearts/probe', busy: '补采中…', label: '补采票据寿命', ok: ['probed', 'session_only'], wait: ['throttled'] },
-  keepalive: { path: 'ide/codearts/keepalive', busy: '验证中…', label: '验证会话', ok: ['alive'], wait: [] },
-  renew: { path: 'ide/codearts/renew', busy: '续期中…', label: '立即续期', ok: ['renewed', 'alive'], wait: ['probe_required', 'rejected', 'busy', 'throttled'] },
-};
-
-/* ── CodeArts 账号行：默认只有一行摘要 ─────────────────────────────────
-   原则（用户诉求）：**正常时不打扰**。一行的三段是
-     `昵称/账号 · 状态短语 · 今日积分`
-   只有「需重新登录」才给一个主按钮（重新登录）和一个次级文字链（重置身份）；
-   补采 / 验证 / 续期属于排障动作，收在点行展开的详情里，默认不可见。
-   技术字段（票据到期、槽目录、person_key…）也只在展开后出现。 */
-
-// caStatusPhrase 状态短语（**唯一来源**，前端不再派生同义字段）。
-// 需人工永远优先：即使 can_auto_renew=true，只要上游明确判定会话已死，
-// 显示「自动维护中」就是误导 —— 用户会一直等一个永远不会发生的自动续期。
-function caStatusPhrase(a) {
-  a = a || {};
-  const needsManual = !!a.needs_manual ||
-    String(a.probe_state || '') === 'login_dead' ||
-    String(a.renew_result || '') === 'needs_login';
-  if (needsManual) return '需重新登录';
-  if (a.can_auto_renew === true) return '自动维护中';
-  if (String(a.ticket_source || '') === 'session') return '会话票据（自动续期）';
-  if (String(a.renew_result || '') === 'failed') return '续期失败（自动重试）';
-  return '待维护';
-}
-
-// caStatusBadge 状态短语 → 徽章外观（kind/mark）。
-function caStatusBadge(phrase) {
-  if (phrase === '需重新登录') return { kind: 'todo', mark: '!' };
-  if (phrase === '自动维护中') return { kind: 'ok', mark: '✓' };
-  if (phrase === '续期失败（自动重试）') return { kind: 'warn', mark: '○' };
-  return { kind: 'mute2', mark: '·' };
-}
-
-// caTodayCreditsText 行内第三段「今日积分」。
-// 只表达今天发生了什么，不把余额/已用/将过期铺在默认行里。
-function caTodayCreditsText(a) {
-  a = a || {};
-  const gain = Number(a.today_gain);
-  if (Number.isFinite(gain) && gain > 0) return '今日 +' + fmtNum(gain);
-  if (a.checked_in_today) return '今日已签';
-  const daily = Number(a.daily_bonus !== undefined ? a.daily_bonus : a.benefit_amount);
-  if (Number.isFinite(daily) && daily > 0) return '今日可领 ' + fmtNum(daily);
-  return '今日 —';
-}
-
-// caSummaryHtml 默认可见的单行摘要（前端测试直接抽取本函数）。
-// 列布局与其它平台卡片统一：账号 | 积分（今日） | 状态 | 操作。
-// 正常状态：除「操作」格外没有按钮；需重新登录：多一个主按钮 + 一个文字链。
-function caSummaryHtml(a) {
-  a = a || {};
-  const id = String(a.id || '');
-  const phrase = caStatusPhrase(a);
-  const badge = caStatusBadge(phrase);
-  const name = String(a.label || a.nickname || id || 'CodeArts 账号');
-  const tip = a.needs_manual ? String(a.probe_msg || a.renew_fail_msg || '') : '';
-  let ops = '';
-  if (phrase === '需重新登录') {
-    ops = UI.act('data-ca-relogin', id, '重新登录', '用这个号自己的身份槽重开登录窗口') +
-      '<span class="ca-link" data-ca-forget="' + esc(id) + '">重置身份</span>';
-  }
-  // 积分列：余额 / 总量（与积分总览同一口径），没有数据就显示「—」。
-  const bal = (a.credits === null || a.credits === undefined)
-    ? '<span class="note">—</span>'
-    : '<b>' + fmtNum(a.credits) + '</b>' +
-      (a.credits_total !== null && a.credits_total !== undefined
-        ? ' <span class="note">/ ' + fmtNum(a.credits_total) + '</span>' : '');
-  return '<div class="ca-sum" data-ca-sum="' + esc(id) + '">' +
-    '<div class="who"><div class="nm" title="' + esc(id) + '">' + esc(name) + '</div>' +
-    '<div class="id">' + esc(id) + '</div></div>' +
-    '<div class="credits">' + bal + '</div>' +
-    '<div>' + UI.badge(badge.kind, badge.mark, phrase, tip) +
-    '<div class="note" style="margin-top:3px">' + esc(caTodayCreditsText(a)) + '</div></div>' +
-    '<div class="acts">' + ops + '</div>' +
-    '</div>';
-}
-
-// caDetailHtml 点行展开后的技术详情（默认 hidden）。
-// slot 来自 GET ide/codearts/slots（按 id 对齐）；旧后端没有该端点时为空对象，
-// 这些字段显示「—」，不猜、不编路径。
-function caDetailHtml(a, slot) {
-  a = a || {};
-  slot = slot || {};
-  const row = (label, value) => {
-    const text = String(value == null ? '' : value).trim();
-    return '<div class="ca-kv"><span class="ca-k">' + esc(label) + '</span>' +
-      '<span class="ca-v">' + esc(text || '—') + '</span></div>';
-  };
-  const id = String(a.id || '');
-  const isDone = !!a.checked_in_today;
-  const ck = isDone
-    ? UI.off('已签到', '今日已签到')
-    : UI.act('data-ca-ck', id, '签到', '今天签到');
-  return '<div class="ca-detail-body">' +
-    row('票据到期', caTime(a.ticket_deadline)) +
-    row('会话约至（估算）', caTime(a.session_expires_at)) +
-    row('上次成功', caTime(a.last_ok_at)) +
-    row('下次续期检查', caTime(a.renew_next_at)) +
-    row('续期结论', CA_RENEW_RESULT[a.renew_result] || a.renew_result) +
-    row('续期失败原因', a.renew_fail_msg) +
-    row('探测状态', CA_PROBE_STATE[a.probe_state] || a.probe_state) +
-    row('探测信息', a.probe_msg) +
-    row('Cookie 构成', '已观测过期 ' + Number(a.expires_known_count || 0) +
-      ' 条 · 会话级 ' + Number(a.session_cookie_count || 0) + ' 条') +
-    row('按人分桶（person_key）', slot.person_key || a.person_key) +
-    row('身份槽目录（slot_dir）', slot.slot_dir || a.slot_dir) +
-    row('槽 ID（slot_id）', slot.slot_id || a.slot_id) +
-    row('设备 ID（device_guid）', slot.device_guid || a.device_guid) +
-    row('签名来源（client_source）', slot.client_source || a.client_source) +
-    row('积分余额', a.credits) +
-    '<div class="ca-acts">' + ck +
-    UI.sub('data-ca-probe', id, '补采票据寿命', '无头浏览器重采 Cookie 过期时间') +
-    UI.sub('data-ca-keepalive', id, '验证会话', '调用上游验证会话是否仍可用') +
-    UI.sub('data-ca-renew', id, '立即续期', '执行一次静默续期（force=true）') +
-    UI.sub('data-ca-rm', id, '移除') +
-    '</div></div>';
-}
-
-// caRowHtml 一行的完整 HTML：摘要 + 折叠详情。
-function caRowHtml(a, slot) {
-  const id = String((a && a.id) || '');
-  return '<div class="trow ca-row" data-ca-row="' + esc(id) + '">' +
-    caSummaryHtml(a) +
-    '<div class="ca-detail" data-ca-detail="' + esc(id) + '" hidden>' +
-    caDetailHtml(a, slot) + '</div></div>';
-}
-
-async function doCaAction(kind, id, btn) {
-  const cfg = CA_ACTIONS[kind];
-  if (!cfg) return;
-  const old = btn ? btn.textContent : '';
-  if (btn) { btn.disabled = true; btn.textContent = cfg.busy; }
-  try {
-    const d = await api(cfg.path, {
-      method: 'POST',
-      body: JSON.stringify({ ids: [id], force: true }),
-    });
-    const rs = (d && d.results) || [];
-    // 多账号响应按 id 取本条；单条响应直接取第一条。
-    const r = rs.find(x => String(x.id) === String(id)) || rs[0] || {};
-    const phase = String(r.phase || '');
-    const msg = r.message || r.msg || '';
-    const good = cfg.ok.indexOf(phase) >= 0;
-    // 失败必须逐字展示后端 message，不得把未执行/失败显示成成功。
-    const text = cfg.label + '：' + (msg || (good ? '完成' : ('未完成（' + (phase || '无 phase') + '）')));
-    toast(text, good ? 'ok' : (cfg.wait.indexOf(phase) >= 0 ? 'warn' : 'err'));
-    if (!viewFrozen()) loadCkCodeArts(true);
-  } catch (e) {
-    // 老后端未注册路由（404）或网络错误：如实报错，不伪装成功。
-    toast(cfg.label + '失败：' + e.message, 'err');
-  } finally { if (btn) { btn.disabled = false; btn.textContent = old || cfg.label; } }
-}
-
-async function loadCkCodeArts(quiet) {
-  const st = $('ckCaState'), list = $('ckCaList');
-  if (!st || !list) return;
-  if (!quiet) { st.hidden = false; st.className = 'state'; st.innerHTML = '<span class="dots">查询中</span>'; list.innerHTML = ''; }
-  try {
-    // 账号状态与身份槽并行取：槽信息只服务展开详情，取不到（旧后端无此端点）
-    // 也不影响默认行 —— 详情里显示「—」，绝不编造路径。
-    const [d, sd] = await Promise.all([
-      api('ide/codearts/accounts'),
-      api('ide/codearts/slots').catch(() => null),
-    ]);
-    const arr = (d && d.accounts) || [];
-    const slotById = {};
-    ((sd && sd.slots) || []).forEach(s => { if (s && s.id) slotById[String(s.id)] = s; });
-    const done = arr.filter(a => a.checked_in_today).length;
-    const manual = arr.filter(a => caStatusPhrase(a) === '需重新登录').length;
-    if ($('ckCaSummary')) {
-      // 统计句收敛为一行；只在确有人工介入时才多一段。
-      let summary = arr.length ? ('共 ' + arr.length + ' 个 · 已签 ' + done) : '未添加账号';
-      if (manual) summary += ' · 需人工 ' + manual;
-      $('ckCaSummary').textContent = summary;
-    }
-    if (!arr.length) {
-      st.hidden = false; st.className = 'state';
-      st.textContent = '还没有账号。点右上角「添加账号」，在「华为 CodeArts」页签里登录华为云即可。';
-      list.innerHTML = ''; return;
-    }
-    list.innerHTML = '<div class="thead"><div>账号</div><div>积分</div><div>状态</div><div>操作</div></div>' +
-      arr.map(a => caRowHtml(a, slotById[String(a.id || '')])).join('');
-    st.hidden = true;
-    // 点行展开/收起详情；点行内按钮或「重置身份」文字链时不折叠。
-    list.querySelectorAll('[data-ca-row]').forEach(row => {
-      row.addEventListener('click', ev => {
-        const hit = ev.target && ev.target.closest ? ev.target.closest('button, [data-ca-forget]') : null;
-        if (hit) return;
-        const det = row.querySelector('[data-ca-detail]');
-        if (det) det.hidden = !det.hidden;
-      });
-    });
-    list.querySelectorAll('button[data-ca-ck]').forEach(b => { b.onclick = () => doCaCheckin(b, b.dataset.caCk); });
-    list.querySelectorAll('button[data-ca-probe]').forEach(b => { b.onclick = () => doCaAction('probe', b.dataset.caProbe, b); });
-    list.querySelectorAll('button[data-ca-keepalive]').forEach(b => { b.onclick = () => doCaAction('keepalive', b.dataset.caKeepalive, b); });
-    list.querySelectorAll('button[data-ca-renew]').forEach(b => { b.onclick = () => doCaAction('renew', b.dataset.caRenew, b); });
-    list.querySelectorAll('button[data-ca-rm]').forEach(b => { b.onclick = () => doCaRemove(b.dataset.caRm); });
-    list.querySelectorAll('button[data-ca-relogin]').forEach(b => { b.onclick = () => doCaRelogin(b.dataset.caRelogin); });
-    list.querySelectorAll('[data-ca-forget]').forEach(el => { el.onclick = () => doCaSlotForget(el.dataset.caForget); });
-  } catch (e) { st.hidden = false; st.className = 'state err'; st.textContent = e.message; }
-}
-
-// doCaAdd 拉浏览器 → 轮询登录态（用户登录成功后自动入库）。
-// watchCaLogin 轮询登录窗口状态：登录成功即入库并刷新签到池。
-// 「添加账号」和「重新登录」（带 id）共用同一套轮询，避免两处判定口径漂移。
-function watchCaLogin() {
-  if (caPollTimer) clearInterval(caPollTimer);
-  caPollTimer = setInterval(async () => {
-    try {
-      const r = await api('ide/codearts/browser/poll');
-      if (r && r.added !== undefined) {
-        clearInterval(caPollTimer); caPollTimer = null;
-        if ($('btnCaStop')) $('btnCaStop').hidden = true;
-        const done = $('addCaDone');
-        if (done) { done.hidden = false; done.className = 'state ok'; done.textContent = r.message || '已添加账号'; }
-        const box = $('addCaState');
-        if (box) box.hidden = true;
-        toast(r.message || '已添加账号', 'ok');
-        loadCkCodeArts(true);
-      } else if (r && r.message) {
-        const b2 = $('addCaState');
-        if (b2) { b2.hidden = false; b2.className = 'state'; b2.textContent = r.message; }
-        const s2 = $('ckCaState');
-        if (s2) { s2.hidden = false; s2.className = 'state'; s2.textContent = r.message; }
-      }
-    } catch (e) { /* 轮询失败继续等 */ }
-  }, 4000);
-}
-
-async function doCaAdd() {
-  try {
-    const d = await api('ide/codearts/browser/start', { method: 'POST', body: '{}' });
-    toast(d.message || '浏览器已打开，请登录华为云');
-    const box = $('addCaState'), err = $('addCaErr');
-    if (err) err.hidden = true;
-    if (box) {
-      box.hidden = false; box.className = 'state';
-      box.innerHTML = '<span class="dots">请在弹出的浏览器窗口里登录华为云，登录成功后会自动保存…</span>';
-    }
-    const st = $('ckCaState');
-    if (st) { st.hidden = false; st.className = 'state'; st.textContent = '请在弹出的浏览器窗口里登录华为云，登录成功后会自动保存…'; }
-    if ($('btnCaStop')) $('btnCaStop').hidden = false;
-    watchCaLogin();
-  } catch (e) {
-    const err = $('addCaErr');
-    if (err) { err.hidden = false; err.className = 'state err'; err.textContent = e.message; }
-    toast(e.message, 'err');
-  }
-}
-
-// doCaRelogin 单账号重新登录：带 id 打开登录窗口，复用该号**自己的身份槽**
-// （同一台设备重登，不凭空多出一台"新设备"）。只在「需重新登录」时出现。
-async function doCaRelogin(id) {
-  if (!id) return;
-  try {
-    const d = await api('ide/codearts/browser/start', { method: 'POST', body: JSON.stringify({ id }) });
-    toast(d.message || '已打开登录窗口，请登录华为云');
-    const box = $('addCaState'), err = $('addCaErr');
-    if (err) err.hidden = true;
-    if (box) {
-      box.hidden = false; box.className = 'state';
-      box.innerHTML = '<span class="dots">请在弹出的窗口里重新登录该账号，登录成功后会自动保存…</span>';
-    }
-    if ($('btnCaStop')) $('btnCaStop').hidden = false;
-    watchCaLogin();
-  } catch (e) { toast('打开登录窗口失败：' + e.message, 'err'); }
-}
-
-// doCaSlotForget 重置身份（换设备）：改 SlotID/DeviceGUID，旧槽目录自动备份。
-// 属于不可逆的身份切换 → 必须二次确认；面板只在人工介入的行给这个入口。
-async function doCaSlotForget(id) {
-  if (!id) return;
-  if (!confirm('重置身份会给该账号换一台「新设备」（DeviceGUID 变化），旧槽目录会备份保留。只在该号确实需要换身份时才做，继续？')) return;
-  try {
-    const r = await api('ide/codearts/slot_forget', { method: 'POST', body: JSON.stringify({ id, confirm: true }) });
-    toast('身份已重置' + (r && r.slot_id ? '（新槽 ' + r.slot_id + '）' : ''), 'ok');
-    loadCkCodeArts(true);
-  } catch (e) { toast('重置身份失败：' + e.message, 'err'); }
-}
-
-// doCaStop 关掉 CodeArts 登录窗口。
-async function doCaStop() {
-  try {
-    await api('ide/codearts/browser/stop', { method: 'POST', body: '{}' });
-    if (caPollTimer) { clearInterval(caPollTimer); caPollTimer = null; }
-    if ($('btnCaStop')) $('btnCaStop').hidden = true;
-    toast('已关闭登录窗口', 'ok');
-  } catch (e) { toast(e.message, 'err'); }
-}
-
-// resetCodeArtsAddPanel 重置弹窗里的 CodeArts 页签。
-function resetCodeArtsAddPanel() {
-  if (caPollTimer) { clearInterval(caPollTimer); caPollTimer = null; }
-  const s = $('addCaState'), d = $('addCaDone'), e = $('addCaErr'), b = $('btnCaStop');
-  if (s) s.hidden = true;
-  if (d) d.hidden = true;
-  if (e) e.hidden = true;
-  if (b) b.hidden = true;
-}
-
-// doCaCheckin 签到单个/全部（id 为空 = 全部）。
-async function doCaCheckin(btn, id) {
-  const old = btn ? btn.textContent : '签到';
-  if (btn) { btn.disabled = true; btn.textContent = '签到中…'; }
-  try {
-    const body = id ? JSON.stringify({ ids: [id] }) : '{}';
-    const d = await api('ide/codearts/checkin', { method: 'POST', body });
-    const rs = (d && d.results) || [];
-    let text, ok = true;
-    if (rs.length === 1) {
-      const r = rs[0];
-      text = r.phase === 'claimed' ? '签到成功 +1000 积分' : (r.msg || r.phase);
-      ok = r.phase === 'claimed' || r.phase === 'already';
-    } else {
-      text = (d && d.msg) || '完成';
-      ok = !(d && d.failed_accounts > 0);
-    }
-    toast(text, ok ? 'ok' : 'err');
-    if (!viewFrozen()) loadCkCodeArts(true);
-  } catch (e) { toast(e.message, 'err'); }
-  finally { if (btn) { btn.disabled = false; btn.textContent = old || '签到'; } }
-}
-
-async function doCaRemove(id) {
-  if (!confirm('从 CodeArts 号池移除该账号？')) return;
-  try {
-    await api('ide/codearts/remove', { method: 'POST', body: JSON.stringify({ id }) });
-    toast('已移除', 'ok');
-    loadCkCodeArts(true);
-  } catch (e) { toast(e.message, 'err'); }
-}
-
-if ($('btnCaAdd')) $('btnCaAdd').onclick = doCaAdd;
-if ($('btnCaStop')) $('btnCaStop').onclick = doCaStop;
-if ($('btnCaCheckinAll')) $('btnCaCheckinAll').onclick = () => doCaCheckin($('btnCaCheckinAll'));
-
-/* 总「一键签到」：主号池 / WorkBuddy / Qoder / MiniMax / CodeArts / Trae / 豆包 全部账号一次签完。
+/* 总「一键签到」：主号池 / WorkBuddy / Qoder / MiniMax / Trae / 豆包 全部账号一次签完。
  *
  * ⚠ 2026-11-08 改成**并行**：以前这里是 7 段 `await` 串行排队，
  *   整条耗时 = 各平台耗时之和。而每个平台内部又是逐号串行、
  *   账号间还有 1.2 秒节流（Trae）、失败 1.5 秒退避（Qoder）、
- *   CodeArts 每号最多 4×2 秒余额重试等待、豆包每号起一个无头浏览器（15~40 秒）。
+ *   豆包每号起一个无头浏览器（15~40 秒）。
  *   结果就是「点一次要等好几分钟，点单个小按钮却秒回」。
  *   现在各平台**同时**发起，耗时 ≈ 最慢的那一个平台。
  *   各平台失败分别计数（不让某个平台的号失效把整条汇总染红）。
  *
  * 【为什么并发是安全的】
- *   七个平台用的是互不相干的接口与凭据（CodeArts 走 Cookie 号池、Qoder/Trae/WorkBuddy
+ *   六个平台用的是互不相干的接口与凭据（Qoder/Trae/WorkBuddy
  *   走各自的 token、豆包走自己的无头浏览器会话），彼此不共享状态；
  *   单个平台内部仍然保持逐号串行 —— 账号间节流是上游风控要求，不能并发。
  */
@@ -6627,17 +6274,6 @@ async function doCheckinAll(btn) {
     } catch (e) { return ['MiniMax 失败：' + e.message, 1]; }
   })());
 
-  // ⑤ CodeArts：网页 Cookie 通道，逐个账号打开控制台点「每日领取」。
-  jobs.push((async () => {
-    try {
-      const ca = await api('ide/codearts/checkin', { method: 'POST', body: '{}' });
-      const car = (ca && ca.results) || [];
-      if (!car.length) return ['CodeArts 无账号', 0];
-      return ['CodeArts 成功 ' + (ca.claimed_accounts || 0) + ' · 已签 ' + (ca.already_accounts || 0) +
-        ' · 失败 ' + (ca.failed_accounts || 0), (ca.failed_accounts || 0)];
-    } catch (e) { return ['CodeArts 失败：' + e.message, 1]; }
-  })());
-
   // ⑥ Trae。
   jobs.push((async () => {
     try {
@@ -6681,7 +6317,7 @@ async function doCheckinAll(btn) {
     if (st) { st.className = failCount > 0 ? 'state err' : 'state ok'; st.textContent = '完成：' + text; }
     toast('一键签到完成：' + text, failCount > 0 ? 'err' : 'ok');
     await loadCheckinPool(true);
-    loadTraeStatus(true); loadTraeCredits(true); loadQkCredits(true); loadWkCredits(true); loadMmCredits(true); loadCaCredits(true);
+    loadTraeStatus(true); loadTraeCredits(true); loadQkCredits(true); loadWkCredits(true); loadMmCredits(true);;
     loadOverview(true);
   } catch (e) {
     if (st) { st.className = 'state err'; st.textContent = e.message; }
@@ -6875,7 +6511,7 @@ async function loadWkCredits(quiet) {
 }
 
 /* ── MiniMax 积分总览块（2026-11-10 新增）────────────────────────────
-   之前积分总览只有 Trae / Qoder / WorkBuddy / CodeArts 四块，MiniMax 只在
+   之前积分总览只有 Trae / Qoder / WorkBuddy 三块，MiniMax 只在
    签到页露过一行 credits，用户看不到「总量还剩多少」→ 这里补一块。
    数据来自 ide/minimax/accounts（该接口已并发查好 credits / credits_total /
    claimed_today / points_today），不额外打上游。 */
@@ -6904,45 +6540,6 @@ async function loadMmCredits(quiet) {
       return '<tr><td class="who"><div class="nm">' + esc(identName(a.user_name || a.label, ident, 'MiniMax 账号')) +
         (a.id && a.id === d.current_id ? '<span class="tag mute" style="margin-left:6px">当前</span>' : '') + '</div>' +
         '<div class="id">' + esc(identLabel(ident, '未设置')) + '</div></td>' +
-        '<td class="num">' + bal + '</td>' +
-        '<td class="num">' + gain + '</td></tr>';
-    }).join('');
-  } catch (e) { st.hidden = false; st.className = 'state err'; st.textContent = e.message; }
-}
-/* ── CodeArts（华为）积分块（2026-11-08 新增）──────────────────────────
-   积分总览原来只有 Trae / Qoder / WorkBuddy 三块 —— 但华为云码道每天也有
-   100 积分，只在「签到」页里露过一眼。用户要的是「几个都做齐」，
-   所以这里补上第四块。
-
-   数据直接取 ide/codearts/accounts：那个接口本来就**并发**查好了每个号的
-   credits / daily_bonus / checked_in_today，这里只是把它显示出来，
-   不会再多打一次上游（这也是"别让面板更慢"的要求）。 */
-async function loadCaCredits(quiet) {
-  const st = $('caCrState'), tb = $('caCrBody');
-  if (!st || !tb) return;
-  if (!quiet) { st.hidden = false; st.className = 'state'; st.innerHTML = '<span class="dots">查询中</span>'; tb.innerHTML = ''; }
-  try {
-    const d = await api('ide/codearts/accounts');
-    const arr = (d && d.accounts) || [];
-    if (!arr.length) {
-      st.hidden = false; st.className = 'state'; st.textContent = 'CodeArts 号池为空。'; tb.innerHTML = ''; return;
-    }
-    st.hidden = true;
-    tb.innerHTML = arr.map(a => {
-      const label = a.label || a.email || a.id || '账号';
-      const remain = a.credits;
-      const total = a.credits_total;
-      const bal = (remain === null || remain === undefined)
-        ? '<span style="color:var(--ink-3)">—</span>'
-        : '<b>' + Number(remain).toLocaleString('zh-CN') + '</b>' +
-          (total !== null && total !== undefined ? ' / ' + Number(total).toLocaleString('zh-CN') : '');
-      const gain = a.checked_in_today
-        ? '<span style="color:var(--ink-3)">今日已签</span>'
-        : '<b>+' + Number(a.daily_bonus || 0).toLocaleString('zh-CN') + '</b>';
-      const dead = a.login_expired ? '<span class="tag mute">会话失效</span>' : '';
-      return '<tr><td class="who"><div class="nm">' + esc(identName(label, a.email, '账号')) +
-        (dead ? dead : '') + '</div>' +
-        '<div class="id">' + esc(identLabel(a.email || a.id, '')) + '</div></td>' +
         '<td class="num">' + bal + '</td>' +
         '<td class="num">' + gain + '</td></tr>';
     }).join('');

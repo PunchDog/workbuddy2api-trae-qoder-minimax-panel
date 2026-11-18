@@ -1087,7 +1087,7 @@ func runNodeScript(t *testing.T, name, script string) string {
 }
 
 // TestFrontendRepairContractAnchors 页面源码必须消费 C-UI-REPAIR@1 的稳定锚点：
-// CodeArts 三按钮 + 票据字段、Qoder 设备/出口与历史、任务中心错误横幅。
+// Qoder 设备/出口与历史、任务中心错误横幅。
 // 同时钉住被明令禁止的无路径承诺文案。
 func TestFrontendRepairContractAnchors(t *testing.T) {
 	js, err := os.ReadFile("app.js")
@@ -1101,15 +1101,6 @@ func TestFrontendRepairContractAnchors(t *testing.T) {
 	src, page := string(js), string(html)
 
 	must := []string{
-		// CodeArts 契约字段（C-CA-API@1）
-		"ticket_deadline", "ticket_source", "session_expires_at", "last_ok_at",
-		"renew_next_at", "renew_result", "renew_fail_msg", "probe_state", "probe_msg",
-		"can_auto_renew", "needs_manual", "expires_known_count", "session_cookie_count",
-		// CodeArts 操作入口（data-* 供测试）
-		"data-ca-probe", "data-ca-renew", "data-ca-keepalive",
-		"ide/codearts/probe", "ide/codearts/renew", "ide/codearts/keepalive",
-		// 文案：会话级 / 估算 / 未观测
-		"票据为会话级", "（估算）", "票据寿命未观测（可点补采）",
 		// Qoder（C-QD-API@1 / C-QD-LEDGER@1）
 		"data-qd-egress", "data-qd-history",
 		"ide/qoder/egress", "ide/qoder/claim_history",
@@ -1132,11 +1123,6 @@ func TestFrontendRepairContractAnchors(t *testing.T) {
 			t.Errorf("页面仍含无路径承诺文案 %q", banned)
 		}
 	}
-	// 必须存在“空 deadline + 空 source”的唯一降级文案。
-	if !strings.Contains(src, "票据寿命未观测") {
-		t.Error("缺少票据寿命未观测的降级文案")
-	}
-
 	// index.html 的骨架锚点
 	for _, s := range []string{
 		`id="tcScanErr"`, `class="scan-error"`,
@@ -1147,63 +1133,6 @@ func TestFrontendRepairContractAnchors(t *testing.T) {
 		if !strings.Contains(page, s) {
 			t.Errorf("index.html 缺少锚点：%q", s)
 		}
-	}
-}
-
-// TestFrontendCodeArtsTicketLines 票据寿命文案：空字段只能是「未观测」，
-// 会话级不得报成不可续期，估算必须标注。
-func TestFrontendCodeArtsTicketLines(t *testing.T) {
-	script := `const fs = require('fs');
-const vm = require('vm');
-const src = fs.readFileSync(process.argv[2], 'utf8');
-const start = src.indexOf('const CA_TICKET_SOURCE');
-const end = src.indexOf('const CA_ACTIONS');
-if (start < 0 || end < 0 || end < start) throw new Error('caTicketLines region not found');
-const ctx = {
-  parseAPITime: v => { const ms = Date.parse(String(v || '')); return Number.isFinite(ms) ? ms : 0; },
-  fmtLocalDateTime: ms => { const d = new Date(ms); const p = n => String(n).padStart(2, '0');
-    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); },
-  String, Number, Date, Object, Array,
-};
-vm.createContext(ctx);
-vm.runInContext(src.slice(start, end) + '\nthis.caTicketLines = caTicketLines;', ctx);
-const empty = ctx.caTicketLines({});
-const session = ctx.caTicketLines({ ticket_source: 'session', session_expires_at: '2026-11-02T21:30:00+08:00' });
-const cookie = ctx.caTicketLines({
-  ticket_deadline: '2026-11-05T08:00:00+08:00', ticket_source: 'cookie',
-  last_ok_at: '2026-11-02T14:30:00+08:00', renew_next_at: '2026-11-03T10:00:00+08:00',
-  renew_result: 'failed', renew_fail_msg: '票据换不回会话',
-  probe_state: 'failed', probe_msg: '网络错误',
-  expires_known_count: 37, session_cookie_count: 14, can_auto_renew: false,
-});
-const manual = ctx.caTicketLines({ needs_manual: true, probe_state: 'login_dead', probe_msg: '会话已失效', can_auto_renew: false });
-process.stdout.write(JSON.stringify({ empty: empty, session: session, cookie: cookie, manual: manual }));`
-	out := runNodeScript(t, "ca-ticket", script)
-	var got struct {
-		Empty   []string `json:"empty"`
-		Session []string `json:"session"`
-		Cookie  []string `json:"cookie"`
-		Manual  []string `json:"manual"`
-	}
-	if err := json.Unmarshal([]byte(out), &got); err != nil {
-		t.Fatalf("unmarshal: %v\n%s", err, out)
-	}
-	join := func(lines []string) string { return strings.Join(lines, "\n") }
-	if len(got.Empty) != 1 || got.Empty[0] != "票据寿命未观测（可点补采）" {
-		t.Fatalf("空字段文案=%v，want 仅「票据寿命未观测（可点补采）」", got.Empty)
-	}
-	if s := join(got.Session); !strings.Contains(s, "票据为会话级") || !strings.Contains(s, "（估算）") {
-		t.Fatalf("会话级文案缺关键句：%s", s)
-	}
-	c := join(got.Cookie)
-	for _, want := range []string{"票据到期：", "上次成功", "下次续期检查", "续期失败原因：票据换不回会话",
-		"探测状态：探测失败（网络错误）", "已观测过期 37 条 · 会话级 14 条", "当前不可自动续期"} {
-		if !strings.Contains(c, want) {
-			t.Errorf("cookie 文案缺 %q：\n%s", want, c)
-		}
-	}
-	if m := join(got.Manual); !strings.Contains(m, "会话已失效") {
-		t.Errorf("needs_manual 文案缺原因：%s", m)
 	}
 }
 
@@ -1451,131 +1380,5 @@ process.stdout.write(JSON.stringify({ partial: partial, fakeDone: fakeDone, real
 	}
 	if !strings.Contains(got.RealDone, "完成") {
 		t.Errorf("verified=true 的 done 应显示完成：%s", got.RealDone)
-	}
-}
-
-// TestFrontendCodeArtsRowCondensed CodeArts 卡片默认只显示一行摘要：
-// 正常态给「自动维护中」且不出现排障按钮，只有需人工时才给重登/重置入口，
-// 技术字段（slot_dir / person_key）只在展开详情里出现。
-//
-// 断言的都是**可见文案**与稳定锚点，不校验整段 HTML 的排版；数据 shape 直接
-// 用 GET ide/codearts/accounts 的字段名（后端契约），前端不得自造同义字段。
-func TestFrontendCodeArtsRowCondensed(t *testing.T) {
-	script := `const fs = require('fs');
-const vm = require('vm');
-const src = fs.readFileSync(process.argv[2], 'utf8');
-const start = src.indexOf('function caStatusPhrase');
-const end = src.indexOf('async function doCaAction');
-if (start < 0 || end < 0 || end < start) throw new Error('caStatusPhrase region not found');
-const ctx = {
-  esc: s => String(s == null ? '' : s),
-  fmtNum: n => String(n),
-  caTime: iso => String(iso || ''),
-  CA_RENEW_RESULT: { needs_login: '需人工登录', failed: '续期失败' },
-  CA_PROBE_STATE: { login_dead: '会话已失效' },
-  UI: {
-    act: (attr, val, label) => '<button class="xs primary" ' + attr + '="' + val + '">' + label + '</button>',
-    sub: (attr, val, label) => '<button class="xs" ' + attr + '="' + val + '">' + label + '</button>',
-    off: label => '<button class="xs" disabled>' + label + '</button>',
-    badge: (kind, mark, text) => '<span class="stask ' + kind + '">' + text + '</span>',
-  },
-  Number, String, console,
-};
-vm.createContext(ctx);
-vm.runInContext(src.slice(start, end) +
-  '\nthis.caStatusPhrase = caStatusPhrase; this.caSummaryHtml = caSummaryHtml;' +
-  'this.caDetailHtml = caDetailHtml; this.caRowHtml = caRowHtml;', ctx);
-
-const normal = { id: 'a1', label: '秋', can_auto_renew: true, checked_in_today: true,
-  today_gain: 100, ticket_source: 'cookie' };
-const manual = { id: 'a2', label: '乙', needs_manual: true, probe_state: 'login_dead',
-  probe_msg: '会话已失效', can_auto_renew: false };
-const sessionAcc = { id: 'a3', ticket_source: 'session', can_auto_renew: false };
-const failedAcc = { id: 'a4', renew_result: 'failed', can_auto_renew: false };
-const fresh = { id: 'a5' };
-const banned = ['补采票据寿命', '验证会话', '立即续期'];
-const normalSum = ctx.caSummaryHtml(normal);
-const manualSum = ctx.caSummaryHtml(manual);
-const detail = ctx.caDetailHtml(normal, {
-  slot_dir: 'D:/x/codearts-slots/a1', person_key: 'person:abc',
-  slot_id: 'a1', device_guid: 'guid-1', client_source: 'browser',
-});
-process.stdout.write(JSON.stringify({
-  phraseNormal: ctx.caStatusPhrase(normal),
-  phraseManual: ctx.caStatusPhrase(manual),
-  phraseSession: ctx.caStatusPhrase(sessionAcc),
-  phraseFailed: ctx.caStatusPhrase(failedAcc),
-  phraseFresh: ctx.caStatusPhrase(fresh),
-  normalHasBanned: banned.some(x => normalSum.indexOf(x) >= 0),
-  manualHasBanned: banned.some(x => manualSum.indexOf(x) >= 0),
-  manualHasRelogin: manualSum.indexOf('data-ca-relogin') >= 0,
-  manualHasForget: manualSum.indexOf('重置身份') >= 0,
-  normalHasAuto: normalSum.indexOf('自动维护中') >= 0,
-  normalHasToday: normalSum.indexOf('今日 +100') >= 0,
-  normalHasName: normalSum.indexOf('秋') >= 0,
-  detailHasSlotDir: detail.indexOf('slot_dir') >= 0 && detail.indexOf('D:/x/codearts-slots/a1') >= 0,
-  detailHasPersonKey: detail.indexOf('person_key') >= 0 && detail.indexOf('person:abc') >= 0,
-  detailFolded: ctx.caRowHtml(normal).indexOf('data-ca-detail="a1" hidden') >= 0,
-}));`
-	out := runNodeScript(t, "ca-condensed", script)
-	var got struct {
-		PhraseNormal     string `json:"phraseNormal"`
-		PhraseManual     string `json:"phraseManual"`
-		PhraseSession    string `json:"phraseSession"`
-		PhraseFailed     string `json:"phraseFailed"`
-		PhraseFresh      string `json:"phraseFresh"`
-		NormalHasBanned  bool   `json:"normalHasBanned"`
-		ManualHasBanned  bool   `json:"manualHasBanned"`
-		ManualHasRelogin bool   `json:"manualHasRelogin"`
-		ManualHasForget  bool   `json:"manualHasForget"`
-		NormalHasAuto    bool   `json:"normalHasAuto"`
-		NormalHasToday   bool   `json:"normalHasToday"`
-		NormalHasName    bool   `json:"normalHasName"`
-		DetailHasSlotDir bool   `json:"detailHasSlotDir"`
-		DetailHasPerson  bool   `json:"detailHasPersonKey"`
-		DetailFolded     bool   `json:"detailFolded"`
-	}
-	if err := json.Unmarshal([]byte(out), &got); err != nil {
-		t.Fatalf("unmarshal: %v\n%s", err, out)
-	}
-	want := map[string]string{
-		"正常态":  "自动维护中",
-		"人工态":  "需重新登录",
-		"会话级":  "会话票据（自动续期）",
-		"续期失败": "续期失败（自动重试）",
-		"空字段":  "待维护",
-	}
-	gotPhrases := map[string]string{
-		"正常态": got.PhraseNormal, "人工态": got.PhraseManual,
-		"会话级": got.PhraseSession, "续期失败": got.PhraseFailed, "空字段": got.PhraseFresh,
-	}
-	for name, w := range want {
-		if gotPhrases[name] != w {
-			t.Errorf("%s状态短语=%q，want %q", name, gotPhrases[name], w)
-		}
-	}
-	if got.NormalHasBanned {
-		t.Error("正常态默认行不得出现补采/验证/续期按钮文案")
-	}
-	if got.ManualHasBanned {
-		t.Error("需人工的默认行也不得出现补采/验证/续期按钮文案（它们属于展开详情）")
-	}
-	if !got.ManualHasRelogin || !got.ManualHasForget {
-		t.Errorf("needs_manual 必须给「重新登录」主按钮与「重置身份」文字链（relogin=%v forget=%v）",
-			got.ManualHasRelogin, got.ManualHasForget)
-	}
-	if !got.NormalHasAuto {
-		t.Error("正常态必须显示「自动维护中」")
-	}
-	if !got.NormalHasToday || !got.NormalHasName {
-		t.Errorf("默认行必须是 `昵称 · 状态 · 今日积分` 单行（name=%v today=%v）",
-			got.NormalHasName, got.NormalHasToday)
-	}
-	if !got.DetailHasSlotDir || !got.DetailHasPerson {
-		t.Errorf("展开详情必须显示 slot_dir / person_key（slot_dir=%v person_key=%v）",
-			got.DetailHasSlotDir, got.DetailHasPerson)
-	}
-	if !got.DetailFolded {
-		t.Error("详情区默认必须是折叠（hidden）状态，不能把技术字段铺在默认行")
 	}
 }

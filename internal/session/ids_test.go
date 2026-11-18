@@ -145,3 +145,30 @@ func TestTurnRequestIDDerivation(t *testing.T) {
 		}
 	}
 }
+
+// TestExtractKeyWithSession 覆盖 x-opencode-session 头纳入会话键的优先级：
+// body 显式会话键（conversation_id / prompt_cache_key）> 头 > 内容派生键；头为空时
+// 与 ExtractKey 完全等价。
+func TestExtractKeyWithSession(t *testing.T) {
+	derivedBody := `{"messages":[{"role":"user","content":"你好"}]}`
+	cases := []struct {
+		name   string
+		body   string
+		header string
+		want   string
+	}{
+		{"header used when body has no explicit key", derivedBody, "ses-abc", "ses-abc"},
+		{"top-level conversation_id wins", `{"conversation_id":"conv-1"}`, "ses-abc", "conv-1"},
+		{"metadata conversation_id wins", `{"metadata":{"conversation_id":"conv-2"}}`, "ses-abc", "conv-2"},
+		{"prompt_cache_key wins", `{"prompt_cache_key":"pck-1"}`, "ses-abc", "pck-1"},
+		{"empty header falls back to explicit key", `{"conversation_id":"conv-3"}`, "", "conv-3"},
+		{"empty header falls back to derived key", derivedBody, "", ExtractKey([]byte(derivedBody))},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := ExtractKeyWithSession([]byte(c.body), c.header); got != c.want {
+				t.Errorf("ExtractKeyWithSession(%q, %q) = %q want %q", c.body, c.header, got, c.want)
+			}
+		})
+	}
+}

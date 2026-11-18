@@ -227,3 +227,27 @@ func TurnRequestID(turnKey string) string {
 	sum := sha256.Sum256([]byte(deriveSalt + "|" + turnKey))
 	return hex.EncodeToString(sum[:16])
 }
+
+// ExtractKeyWithSession 在 ExtractKey 之前先纳入入站 x-opencode-session 头。
+// opencode 对所有 provider 发送该头（值=sessionID），但请求体不带 conversation_id；
+// 不纳入会让它落到内容派生键，同会话多轮虽稳定却丢失客户端显式标识，且口径与
+// conversation_id 不一致。优先级：body 显式会话键（conversation_id / prompt_cache_key）
+// > x-opencode-session > 内容派生键。头值为空时与 ExtractKey 完全等价。
+func ExtractKeyWithSession(body []byte, opencodeSession string) string {
+	if opencodeSession != "" && ResolveConversationID(body) == "" && resolvePromptCacheKey(body) == "" {
+		return opencodeSession
+	}
+	return ExtractKey(body)
+}
+
+// resolvePromptCacheKey 取 body 顶层的 prompt_cache_key（OpenAI 前缀缓存键，语义为会话级）。
+func resolvePromptCacheKey(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(body, &obj); err != nil {
+		return ""
+	}
+	return strOrEmpty(obj["prompt_cache_key"])
+}

@@ -4,8 +4,8 @@ package panel
 //
 // 为什么需要（实测 2026-11-04，浏览器 Network 面板逐条量过）：
 // 面板签到池首屏会并发打同一批慢接口 —— qoder/checkin-status 2.6s、
-// qoder/usage 1.8s、workbuddy/usage 1.9s、minimax/accounts 1.2s、
-// codearts/accounts 1.0s；而前端三条渲染链（号池列表 / 任务中心 / 积分速览）
+// qoder/usage 1.8s、workbuddy/usage 1.9s、minimax/accounts 1.2s；
+// 而前端三条渲染链（号池列表 / 任务中心 / 积分速览）
 // 各自独立请求一遍，于是同一个接口被打 4~5 次，每次都真打上游。
 // 结果就是"进面板要加载很久"，而且**时间被并发放大了**。
 //
@@ -196,7 +196,6 @@ func (p *Panel) WarmIDECaches(delay time.Duration) {
 			warm("/panel/api/ide/qoder/checkin-status", p.qoderCheckinStatus)
 			warm("/panel/api/ide/qoder/accounts", p.qoderAccounts)
 			warm("/panel/api/ide/minimax/accounts", p.minimaxAccounts)
-			warm("/panel/api/ide/codearts/accounts", p.codeartsAccounts)
 			// 面板是**逐号**查额度的，冷启动时每个约 1.0s —— 逐个预热。
 			if list, err := ideauth.ListQoderAccounts(); err == nil {
 				for _, a := range list {

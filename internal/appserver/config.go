@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/linguo2625469/workbuddy2api-panel/internal/prompt"
+	"github.com/linguo2625469/workbuddy2api-panel/internal/server"
 )
 
 // Config 顶层配置。
@@ -261,6 +262,11 @@ type Config struct {
 
 	// Qoder 双区模型通道（qoder-cn:/qoder-intl:/qoder: 前缀）的调度参数。
 	// 账号来自 IDE 号池的 Qoder 登录态，与 WorkBuddy/Trae 的池完全独立。
+	// OpenCode opencode-go 透明转发通道（/opencode/v1/* → opencode.ai/inference/go/v1）。
+	// 不接号池：不参与选号/用量/冷却，Authorization 由调用方提供上游 Key。
+	// 与 ~/.config/opencode/opencode.json 的 opencode-go provider 配套使用。
+	OpenCode server.OpenCodeConfig `json:"opencode"`
+
 	Qoder struct {
 		// Chat 聊天调度：冷却/并发/超时口径。缺省值与 trae.chat 对齐，
 		// 但 Qoder 的额度是**按人共享**的每日 100 Credits（10:00 CST 刷新），
@@ -389,6 +395,9 @@ func Default() *Config {
 	c.Qoder.Chat.IdleTimeout = "180s"
 	c.Qoder.Chat.CatalogTTL = "10m"
 	c.Qoder.Chat.PeerCooldown = "10m"
+	// opencode-go 转发通道：缺省开启，基址空 = 内置 https://opencode.ai/inference/go/v1。
+	c.OpenCode.Enabled = true
+	c.OpenCode.Timeout = "300s"
 	return c
 }
 
@@ -621,6 +630,23 @@ func applyEnv(c *Config) {
 			c.Pool.PreferExpiring = b
 		}
 	}
+	if v := os.Getenv("WB2A_OPENCODE_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			c.OpenCode.Enabled = b
+		}
+	}
+	if v := os.Getenv("WB2A_OPENCODE_BASE_URL"); v != "" {
+		c.OpenCode.BaseURL = v
+	}
+	if v := os.Getenv("WB2A_OPENCODE_TIMEOUT"); v != "" {
+		c.OpenCode.Timeout = v
+	}
+	if v := os.Getenv("WB2A_OPENCODE_API_KEY"); v != "" {
+		c.OpenCode.APIKey = v
+	}
+	if v := os.Getenv("WB2A_OPENCODE_USAGE_URL"); v != "" {
+		c.OpenCode.UsageURL = v
+	}
 }
 
 func (c *Config) normalize() error {
@@ -809,6 +835,19 @@ func (c *Config) normalize() error {
 	}
 	if c.QoderChatPeerCooldown, qerr = parseQoderChatDur(c.Qoder.Chat.PeerCooldown, 10*time.Minute); qerr != nil {
 		return fmt.Errorf("qoder.chat.peer_cooldown: %w", qerr)
+	}
+	// opencode-go 转发通道：基址去尾斜杠（后端拼 /chat/completions 不出双斜杠）；
+	// timeout 显式配了就必须可解析，非法值 fail fast，不静默回落。
+	c.OpenCode.BaseURL = strings.TrimRight(strings.TrimSpace(c.OpenCode.BaseURL), "/")
+	// 用量端点去首尾空白（空 = 面板侧回落官方端点），不做 URL 合法性校验——
+	// 由查询时 http.NewRequest 报错并如实展示，避免 normalize 因自定义代理格式过严而拒启。
+	c.OpenCode.UsageURL = strings.TrimSpace(c.OpenCode.UsageURL)
+	if s := strings.TrimSpace(c.OpenCode.Timeout); s != "" {
+		if d, err := time.ParseDuration(s); err != nil {
+			return fmt.Errorf("opencode.timeout: %w", err)
+		} else if d <= 0 {
+			return fmt.Errorf("opencode.timeout: 非正时长 %q 无意义", s)
+		}
 	}
 	if err := c.validateScheduleHours(); err != nil {
 		return err

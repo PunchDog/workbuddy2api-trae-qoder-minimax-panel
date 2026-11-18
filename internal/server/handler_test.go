@@ -1844,3 +1844,49 @@ func TestChatMarkupRepairStrictModeRejectsUndeclaredTool(t *testing.T) {
 		t.Fatalf("未声明的工具名不得转换: %#v", msg["tool_calls"])
 	}
 }
+
+// TestChatOpencodeSessionHeaderForwarded 验证 opencode 的 x-opencode-session 头：
+//  1. 原样透传给上游（X-Opencode-Session）；
+//  2. 映射为会话标识（X-Conversation-ID）；
+//  3. 作为粘性键使用（同会话多轮绑定同一账号）。
+func TestChatOpencodeSessionHeaderForwarded(t *testing.T) {
+	var gotSession, gotConv string
+	up := &upstream.Client{
+		HTTP: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			gotSession = r.Header.Get("X-Opencode-Session")
+			gotConv = r.Header.Get("X-Conversation-ID")
+			return &http.Response{
+				StatusCode: 200,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body:       io.NopCloser(strings.NewReader(sseOK)),
+			}, nil
+		})},
+		ChatBaseCN:    "https://fake.example",
+		BillingBaseCN: "https://fake.example",
+	}
+	st := newBindStore()
+	sess := session.New(session.Config{
+		TTL:       time.Minute,
+		Store:     st,
+		Available: func() []string { return []string{"good"} },
+	})
+	p := testPoolWith(&auth.Auth{UID: "good", AccessToken: "at-good", ExpiresAt: 9999999999})
+	h := NewHandler(Config{Pool: p, Upstream: up, Session: sess, SoftCooldown: time.Minute})
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"glm-5.2","messages":[]}`))
+	req.Header.Set("X-Opencode-Session", "ses-abc")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("code=%d body=%s", rec.Code, rec.Body)
+	}
+	if gotSession != "ses-abc" {
+		t.Errorf("outbound X-Opencode-Session=%q want ses-abc", gotSession)
+	}
+	if gotConv != "ses-abc" {
+		t.Errorf("outbound X-Conversation-ID=%q want ses-abc", gotConv)
+	}
+	if uid, ok := st.lastUID("ses-abc"); !ok || uid != "good" {
+		t.Errorf("sticky binding key should be x-opencode-session value, got uid=%q ok=%v binds=%v", uid, ok, st.binds)
+	}
+}

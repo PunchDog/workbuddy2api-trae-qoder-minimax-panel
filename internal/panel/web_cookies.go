@@ -17,8 +17,6 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	"github.com/linguo2625469/workbuddy2api-panel/internal/codearts"
 )
 
 // cdpCookie 一条 Cookie（CDP Storage.getCookies 的形状）。
@@ -30,16 +28,6 @@ type cdpCookie struct {
 	Expires  float64 `json:"expires"`
 	HTTPOnly bool    `json:"httpOnly"`
 	Secure   bool    `json:"secure"`
-}
-
-// toCodearts 把 CDP Cookie 归一成号池 Cookie（UI 采集路径的**唯一入口**）。
-//
-// 关键在 -1：CDP 对"没有 expires 字段"的会话 Cookie 返回 -1，这是已知事实，
-// 必须原样落成 {Expires:-1, ExpiresKnown:true, Session:true}。过去调用点自己拼
-// 结构体，-1 虽然写进了 Expires，但 ExpiresKnown 是 false，票据寿命照样判不出来
-// （IDPDeadline 只认 ExpiresKnown && Expires>0）。
-func (c cdpCookie) toCodearts() codearts.Cookie {
-	return codearts.NewObservedCookie(c.Name, c.Value, c.Domain, c.Path, c.Expires)
 }
 
 // cdpAllCookies 取浏览器里**所有域**的 Cookie。

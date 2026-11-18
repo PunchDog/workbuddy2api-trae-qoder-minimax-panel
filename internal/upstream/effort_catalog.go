@@ -5,7 +5,7 @@
 //   - 本文件按 realm 分开的产品级静态兜底表（远端缺失时补齐）；
 //   - 两者皆无 → 不在 /v1/models 输出 effort 字段（omitted，不是空数组）。
 //
-// 档位值照抄参考仓库 dsh-codearts：CN/CodeBuddy 面取 src/product.ts CODEBUDDY_FALLBACK_MODELS
+// 档位值取自参考仓库的 CN/CodeBuddy 面 src/product.ts CODEBUDDY_FALLBACK_MODELS
 // ∪ src/buddy-adapter.ts:126-137 REASONING_EFFORTS；global/WorkBuddy 面取 src/product.ts
 // WORKBUDDY_FALLBACK_MODELS。两个 realm 对同一模型给出不同档位（如 deepseek-v4.1-flash：
 // CN 三档 ['low','high','max']、global 仅 ['high']），故**按 realm 分表**，绝不混用。

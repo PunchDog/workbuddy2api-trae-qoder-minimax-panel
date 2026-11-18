@@ -188,6 +188,31 @@ type ChatMeta struct {
 	ConversationID        string // X-Conversation-ID：body 提取的入站值，空则不发（透传优先，不伪造）
 	ConversationRequestID string // X-Conversation-Request-ID / X-Root-Request-ID：聚合主键，必发
 	TraceID               string // X-Trace-ID：入站透传值，空则回落 conversationRequestID
+	OpencodeSession       string // X-Opencode-Session：opencode 客户端会话标识，空则不发（原样透传）
+}
+
+// OpencodeSessionHeader 是 opencode 对所有 provider 发送的会话标识头（值为 sessionID）。
+// 面板把它映射为会话标识（X-Conversation-ID + 粘性键），并原样透传给上游。
+const OpencodeSessionHeader = "X-Opencode-Session"
+
+// SanitizeOpencodeSession 清洗入站 x-opencode-session 头值：去首尾空白、剔除控制字符
+// （防头注入）、限长 256。空值返回空串（调用方据此不发头、不作会话键）。
+func SanitizeOpencodeSession(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range v {
+		if r < 0x20 || r == 0x7f {
+			continue
+		}
+		if b.Len()+len(string(r)) > 256 {
+			break
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // ChatHeaders 在 common 之上加 chat 专属的账号头。
@@ -276,6 +301,10 @@ func (c *Client) injectConversationHeaders(req *http.Request, meta ChatMeta) {
 	messageID := session.NewMessageID()
 	if meta.ConversationID != "" {
 		req.Header.Set("X-Conversation-ID", meta.ConversationID)
+	}
+	// opencode 会话头原样透传（值已由 SanitizeOpencodeSession 清洗）。
+	if meta.OpencodeSession != "" {
+		req.Header.Set(OpencodeSessionHeader, meta.OpencodeSession)
 	}
 	req.Header.Set("X-Conversation-Request-ID", convReqID)
 	req.Header.Set("X-Conversation-Message-ID", messageID)

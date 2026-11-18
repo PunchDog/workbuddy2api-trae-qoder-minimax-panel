@@ -10,6 +10,14 @@ import (
 	"github.com/linguo2625469/workbuddy2api-panel/internal/ideauth"
 )
 
+// errStr 把 error 转为其文本（nil → 空串），供 Qoder 重登录等多处共用。
+func errStr(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
 // qoderRelogin POST /panel/api/ide/qoder/relogin  {"email":"..."}
 //
 // 干什么：让号池里**指定的某个号**在 Qoder 客户端里真登录一次。

@@ -181,11 +181,6 @@ func New(cfg Config) *Panel {
 		mmLogins: map[string]*minimax.DeviceSession{},
 	}
 	p.routes()
-	// CodeArts 号池整理（合并"同一个人被拆成多条"的重复账号）。
-	// 同步做：保活紧接着就要读号池，不能读到整理前的旧数据。
-	p.codeartsMigratePool()
-	// CodeArts 会话保活（华为云会话是空闲超时型，定时打一次能显著延长有效期）。
-	go p.codeartsKeepalive()
 	return p
 }
 
@@ -245,6 +240,7 @@ func (p *Panel) routes() {
 	p.mux.HandleFunc("GET /panel/api/packages", p.withAuth(p.packages))
 	p.mux.HandleFunc("GET /panel/api/usage", p.withAuth(p.usage))
 	p.mux.HandleFunc("GET /panel/api/usage/official", p.withAuth(p.usageOfficial))
+	p.mux.HandleFunc("GET /panel/api/usage/opencode", p.withAuth(p.usageOpenCode))
 	p.mux.HandleFunc("POST /panel/api/usage/save", p.withAuth(p.usageSave))
 	p.mux.HandleFunc("GET /panel/api/model_probes", p.withAuth(p.modelProbes))
 	// 模型排队与冷却：WorkBuddy 池内模型级冷却 + Trae 模型请求限额（Qoder 无该接口）。
@@ -293,22 +289,6 @@ func (p *Panel) routes() {
 	p.mux.HandleFunc("GET /panel/api/ide/qoder/devlogin/poll", p.withAuth(p.qoderDevLoginPoll))
 	p.mux.HandleFunc("POST /panel/api/ide/doubao/remove", p.withAuth(p.doubaoRemove))
 	p.mux.HandleFunc("POST /panel/api/ide/doubao/checkin", p.withAuth(p.doubaoCheckin))
-
-	// CodeArts（华为云码道）：浏览器登录取 Cookie + 每日领取
-	p.mux.HandleFunc("GET /panel/api/ide/codearts/accounts", p.withAuth(p.cachedRead(apiCacheTTLIDE, p.codeartsAccounts)))
-	p.mux.HandleFunc("POST /panel/api/ide/codearts/remove", p.withAuth(p.codeartsRemove))
-	p.mux.HandleFunc("POST /panel/api/ide/codearts/browser/start", p.withAuth(p.codeartsBrowserStart))
-	p.mux.HandleFunc("POST /panel/api/ide/codearts/browser/stop", p.withAuth(p.codeartsBrowserStop))
-	p.mux.HandleFunc("GET /panel/api/ide/codearts/browser/poll", p.withAuth(p.codeartsBrowserPoll))
-	p.mux.HandleFunc("POST /panel/api/ide/codearts/checkin", p.withAuth(p.codeartsCheckin))
-	p.mux.HandleFunc("POST /panel/api/ide/codearts/add_port", p.withAuth(p.codeartsAddFromPort))
-	p.mux.HandleFunc("GET /panel/api/ide/codearts/api_probe", p.withAuth(p.codeartsAPIProbe))
-	p.mux.HandleFunc("GET /panel/api/ide/codearts/api_test", p.withAuth(p.codeartsAPITest))
-	p.mux.HandleFunc("GET /panel/api/ide/codearts/sniff", p.withAuth(p.codeartsSniffHeaders))
-	p.mux.HandleFunc("POST /panel/api/ide/codearts/refresh", p.withAuth(p.codeartsRefresh))
-	// 粘贴 Cookie 导入：用户在**自己的浏览器**里登的华为云，面板也能收进来
-	// （不要求调试端口，不限浏览器；方式从来不止一种）。
-	p.mux.HandleFunc("POST /panel/api/ide/codearts/import_cookie", p.withAuth(p.codeartsImportCookie))
 	p.mux.HandleFunc("GET /panel/api/ide/doubao/status", p.withAuth(p.doubaoStatus))
 
 	// Trae IDE 本地账号（读号池 / 添加 / 切号）
