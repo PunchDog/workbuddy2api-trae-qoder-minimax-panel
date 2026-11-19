@@ -4,6 +4,7 @@ package server
 // 纯 io.Copy 透传从不记账，用量页「网关用量/用量明细」opencode 恒空。
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -56,6 +57,50 @@ func TestOpenCodeUsageSyncBucket(t *testing.T) {
 	}
 	if len(snap.ByModel) != 1 || snap.ByModel[0].Key != "hy4-flash" {
 		t.Fatalf("模型维度不对: %+v", snap.ByModel)
+	}
+}
+
+// TestOpenCodeUsageGzipSync 非流式 + 上游 gzip 压缩：压缩字节与
+// Content-Encoding 必须原样透传（客户端自解压），同时按解压后的 usage 入桶。
+// 回归点：此前对压缩容器直接 Unmarshal 失败，日志 tok 恒为 "-"。
+func TestOpenCodeUsageGzipSync(t *testing.T) {
+	const payload = `{"id":"x","model":"hy4-flash","usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10}}`
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Encoding", "gzip")
+		zw := gzip.NewWriter(w)
+		_, _ = zw.Write([]byte(payload))
+		_ = zw.Close()
+	}))
+	defer up.Close()
+	rec := usage.New("")
+	h := newOpenCodeUsageHandler(up.URL, rec)
+	// 必须显式声明 Accept-Encoding：否则 Go 出站 Transport 自动加 gzip 并透明解压，
+	// 压缩路径根本不会到达 handler（真实客户端都会显式声明）。
+	req := httptest.NewRequest("POST", "/opencode/v1/chat/completions",
+		strings.NewReader(`{"model":"hy4-flash","messages":[]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept-Encoding", "gzip")
+	resp := httptest.NewRecorder()
+	h.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("code=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Header().Get("Content-Encoding"); got != "gzip" {
+		t.Fatalf("Content-Encoding 未透传: %q", got)
+	}
+	zr, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		t.Fatalf("客户端解压失败（字节被改动）: %v", err)
+	}
+	plain, err := io.ReadAll(zr)
+	if err != nil || string(plain) != payload {
+		t.Fatalf("压缩响应被改动: err=%v body=%s", err, plain)
+	}
+	snap := rec.SnapshotWindow(usage.Window{}, nil, nil)
+	if snap.Totals.Requests != 1 || snap.Totals.Errors != 0 ||
+		snap.Totals.PromptTokens != 7 || snap.Totals.CompletionTok != 3 || snap.Totals.TotalTokens != 10 {
+		t.Fatalf("压缩响应用量桶不对: %+v", snap.Totals)
 	}
 }
 

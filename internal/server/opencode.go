@@ -13,6 +13,7 @@ package server
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"io"
 	"log"
@@ -249,8 +250,11 @@ func (h *Handler) opencodeProxy(w http.ResponseWriter, r *http.Request) {
 			if _, wErr := w.Write(buf); wErr != nil && relayErr == nil {
 				relayErr = wErr
 			}
+			// 上游会按客户端 Accept-Encoding 压缩非流式响应（实测 gzip）：
+			// 压缩容器直接 Unmarshal 必失败（tok 记 -）。只解压一份副本供记账，
+			// 转发给客户端的原始字节与 Content-Encoding 头不变。
 			var obj map[string]any
-			if json.Unmarshal(buf, &obj) == nil {
+			if dec := decodeForUsage(resp.Header.Get("Content-Encoding"), buf); dec != nil && json.Unmarshal(dec, &obj) == nil {
 				d := usageDeltaFromResponse(obj)
 				st.promptTokens, st.completionTokens, st.totalTokens = d.PromptTokens, d.CompletionTokens, d.TotalTokens
 				if st.totalTokens > 0 {
@@ -277,6 +281,32 @@ func (h *Handler) opencodeProxy(w http.ResponseWriter, r *http.Request) {
 		}
 		h.opencodeRecordUsage(st, started)
 		st.done()
+	}
+}
+
+// decodeForUsage 返回供记账解析的明文 JSON 副本。
+// 上游按客户端 Accept-Encoding 压缩非流式响应时，buf 是压缩容器，
+// 直接 Unmarshal 必失败；这里仅解一份副本给 usage 解析用，
+// 转发给客户端的原始字节不变。不支持的编码（br/zstd 等）或解压失败
+// 返回 nil：放弃本次 usage（tok 记 "-"），不影响转发与响应状态。
+func decodeForUsage(contentEncoding string, buf []byte) []byte {
+	switch strings.ToLower(strings.TrimSpace(contentEncoding)) {
+	case "", "identity":
+		return buf // 未压缩：原字节即 JSON
+	case "gzip":
+		zr, err := gzip.NewReader(bytes.NewReader(buf))
+		if err != nil {
+			return nil
+		}
+		defer zr.Close()
+		// 解压后同样按响应上限封顶，防压缩炸弹打爆内存。
+		out, err := io.ReadAll(io.LimitReader(zr, openCodeMaxResp+1))
+		if err != nil || len(out) > openCodeMaxResp {
+			return nil
+		}
+		return out
+	default:
+		return nil
 	}
 }
 
