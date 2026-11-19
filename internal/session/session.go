@@ -340,6 +340,17 @@ func ExtractKey(body []byte) string {
 	if err := json.Unmarshal(body, &obj); err != nil {
 		return ""
 	}
+	return ExtractKeyObj(obj)
+}
+
+// ExtractKeyObj 从已解析的请求体对象派生会话键，优先级与 ExtractKey 完全一致
+// （metadata.conversation_id > conversation_id > conversationId > prompt_cache_key
+// > 内容派生键）。供调用方已持有解析结果时复用（opencode 单次解析路径），
+// 省掉一次全量 Unmarshal；obj 为 nil（解析失败）返回 ""，与字节版失败语义对齐。
+func ExtractKeyObj(obj map[string]any) string {
+	if obj == nil {
+		return ""
+	}
 	if meta, ok := obj["metadata"].(map[string]any); ok {
 		if v := strOrEmpty(meta["conversation_id"]); v != "" {
 			return v

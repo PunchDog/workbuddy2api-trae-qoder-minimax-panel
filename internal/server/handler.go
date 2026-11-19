@@ -90,7 +90,8 @@ type Config struct {
 	// nil = 未配置密钥。
 	MMAPI *mmapi.Registry
 	// OpenCode opencode-go 透明转发通道（独立路径 /opencode/v1/*）。
-	// 与号池完全无关：不参与选号/用量/冷却，Authorization 由调用方提供（上游凭据）。
+	// 与号池完全无关：不参与选号/冷却；上游 Key 优先级 配置 opencode.api_key >
+	// 调用方 Authorization > env 兜底；chat/completions 计入网关用量（realm=opencode）。
 	OpenCode OpenCodeConfig
 }
 
@@ -103,6 +104,7 @@ func (h *Handler) loadLive() livecfg.Snapshot {
 		APIKey:           h.cfg.APIKey,
 		SoftCooldown:     h.cfg.SoftCooldown,
 		RecordClientInfo: h.cfg.RecordClientInfo,
+		OpenCodeAPIKey:   h.cfg.OpenCode.APIKey,
 	}
 }
 
@@ -197,8 +199,8 @@ func NewHandler(cfg Config) *Handler {
 	h.mux.HandleFunc("GET /status", h.withAuth(h.status))
 	h.mux.HandleFunc("GET /healthz", h.healthz)
 	// opencode-go 透明转发通道：独立前缀，与 /v1/* 号池路由互不影响。
-	// 不套 withAuth——调用方（WorkBuddy/Qoder）填的是 opencode 上游 Key，
-	// Authorization 由转发层原样送上游（见 opencode.go）。
+	// 不套 withAuth——上游 Key 由转发层按「配置 > 调用方 > env 兜底」决定
+	// （见 opencode.go）；chat/completions 在转发层内计入网关用量。
 	h.mux.HandleFunc(openCodePathPrefix+"/", h.opencodeProxy)
 	if cfg.Panel != nil {
 		h.mux.Handle("/panel/", cfg.Panel) // /panel → /panel/ 由 ServeMux 自动重定向
@@ -207,8 +209,11 @@ func NewHandler(cfg Config) *Handler {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// chat 类入口统一挂请求追踪（含 opencode 独立转发通道），出口写 reqlog，
+	// 面板「运行日志」的请求记录/指标据此渲染；/models 等非 chat 路径不追踪。
 	if h.cfg.RequestLog != nil && r.Method == http.MethodPost &&
-		(r.URL.Path == "/v1/chat/completions" || r.URL.Path == "/v1/responses") {
+		(r.URL.Path == "/v1/chat/completions" || r.URL.Path == "/v1/responses" ||
+			r.URL.Path == openCodePathPrefix+"/chat/completions") {
 		trace := &requestTrace{id: reqlog.NewRequestID(), start: time.Now(), path: r.URL.Path}
 		if h.loadLive().RecordClientInfo {
 			trace.captureClientInfo(r)

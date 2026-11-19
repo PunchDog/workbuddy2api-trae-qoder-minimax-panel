@@ -87,6 +87,12 @@ func newTransport() *http.Transport {
 	}
 }
 
+// NewTransport 为号池外通道（opencode 透明转发等）构造独立的加固出站 Transport。
+// 与 newTransport 同一连接层口径（禁 h2 / dial 10s / keepalive 15s / TLS 握手 10s /
+// 每主机 20 条空闲连接），调用方按自己通道口径覆盖 ResponseHeaderTimeout。
+// 每次调用返回新实例：通道间连接池隔离，不与号池客户端共享空闲连接。
+func NewTransport() *http.Transport { return newTransport() }
+
 // closeIdler 实现该接口的 RoundTripper 支持清空空闲连接池（*http.Transport、
 // http2.Transport 等均满足；测试注入的自定义 RoundTripper 可选择性实现）。
 type closeIdler interface {

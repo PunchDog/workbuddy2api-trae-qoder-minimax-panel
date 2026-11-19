@@ -1416,9 +1416,9 @@ legend { font-size: 12px; color: var(--ink-3); font-weight: 600; padding-bottom:
           <header><h3>OpenCode 用量查询</h3></header>
           <div class="pad">
             <label class="fld"><span class="lb">OpenCode API Key</span>
-              <div class="inline"><input name="opencode_api_key" id="cfgOpenCodeKey" type="password" placeholder="opencode 上游 Key（用于查询订阅用量）">
+              <div class="inline"><input name="opencode_api_key" id="cfgOpenCodeKey" type="password" placeholder="opencode 上游 Key（转发优先使用，并用于查询订阅用量）">
               <button type="button" class="xs" id="btnOpenCodeEye">显示</button></div>
-              <span class="hint">写入 opencode.api_key；用量页据此查询 OpenCode Go 的 5 小时 / 周 / 月配额，留空 = 不查询。改动即时生效，无需重启。</span></label>
+              <span class="hint">写入 opencode.api_key；配置后 /opencode/v1 转发一律用此 Key（优先于客户端自带），留空 = 沿用客户端 Key（缺省回退环境变量 OPEN_CODE_TOKEN_PLAN_API_KEY）。用量页也据此查询 OpenCode Go 的 5 小时 / 周 / 月配额。改动即时生效，无需重启。</span></label>
             <div class="hint" style="margin-top:8px">自定义用量端点（<code>opencode.usage_url</code>）需手工编辑配置文件；留空用官方 <code>https://opencode.ai/zen/go/v1/usage</code>。</div>
           </div>
         </div>

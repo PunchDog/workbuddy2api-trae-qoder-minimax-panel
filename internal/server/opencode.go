@@ -3,15 +3,17 @@
 // 为什么单独一个路径而不是塞进 /v1/chat/completions：
 //   - opencode-go（https://opencode.ai/inference/go/v1）是 OpenAI 兼容协议，
 //     但要求每请求带 x-opencode-session；直连缺该头返回 400 MissingSessionID。
-//   - WorkBuddy / Qoder 等客户端无法注入该头，且它们配置里填的 apiKey 是
-//     opencode 上游 Key（OPEN_CODE_TOKEN_PLAN_API_KEY），不是本网关 api_key。
-//     因此这条路径不套 withAuth，Authorization 原样透传上游。
-//   - 与 cn/global/trae/minimax/qoder 号池完全隔离：不参与选号、用量、冷却、
-//     熔断，避免把订阅额度问题混进号池健康度。
+//   - WorkBuddy / Qoder 等客户端无法注入该头，因此这条路径不套 withAuth。
+//     上游 Key 优先级：配置 opencode.api_key（热生效）> 调用方 Authorization >
+//     环境变量 OPEN_CODE_TOKEN_PLAN_API_KEY 兜底（调用方没带或带的是网关 Key 时）。
+//   - 与 cn/global/trae/minimax/qoder 号池完全隔离：不参与选号、冷却、熔断，
+//     避免把订阅额度问题混进号池健康度。chat/completions 单独计入网关用量
+//     （realm/uid 固定 opencode），供用量页「网关用量/用量明细」统计。
 package server
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"log"
 	"net/http"
@@ -19,8 +21,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/linguo2625469/workbuddy2api-panel/internal/reqlog"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/session"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/upstream"
+	usagepkg "github.com/linguo2625469/workbuddy2api-panel/internal/usage"
 )
 
 const (
@@ -33,6 +37,9 @@ const (
 	openCodeMaxBody = 64 << 20
 	// openCodeDefaultHeaderTimeout 等上游响应头的缺省上限（SSE 长流不适用整体超时）。
 	openCodeDefaultHeaderTimeout = 300 * time.Second
+	// openCodeMaxResp 非流式响应记账缓冲上限（8 MiB）：聊天 JSON 再长也远小于此，
+	// 封顶防异常大包打爆内存；超限先写已缓冲部分再透传剩余，放弃 usage 解析。
+	openCodeMaxResp = 8 << 20
 )
 
 // OpenCodeConfig opencode-go 转发通道配置。
@@ -44,7 +51,8 @@ type OpenCodeConfig struct {
 	// Timeout 等上游响应头的时长（如 "300s"）；空/非法 = 缺省 300s。
 	Timeout string `json:"timeout"`
 	// APIKey opencode 上游 Key（OPEN_CODE_TOKEN_PLAN_API_KEY / providers[].apiKey）。
-	// 用量页据此查订阅配额；空 = 用量页提示去配置。不参与转发鉴权（转发沿用调用方 Key）。
+	// 配置后 /opencode/v1 转发一律用它（优先于调用方自带 Key），经 livecfg 热生效；
+	// 用量页也据此查订阅配额。空 = 转发沿用调用方 Key（缺省回退 env），用量页提示去配置。
 	APIKey string `json:"api_key"`
 	// UsageURL 用量查询端点；空 = 面板侧回落 https://opencode.ai/zen/go/v1/usage。
 	// 仅用于测试/自建代理；消费方是 panel.usageOpenCode，本包不主动发请求。
@@ -60,8 +68,14 @@ func (h *Handler) opencodeHTTPClient() *http.Client {
 		if d, err := time.ParseDuration(strings.TrimSpace(h.cfg.OpenCode.Timeout)); err == nil && d > 0 {
 			timeout = d
 		}
-		tr := http.DefaultTransport.(*http.Transport).Clone()
-		tr.ResponseHeaderTimeout = timeout
+		// 加固 Transport（单一事实源 upstream.NewTransport）：此前用
+		// DefaultTransport.Clone()，每主机空闲连接仅 2 条且无 dial/TLS 超时，
+		// 并发或空闲后每请求重做 TCP+TLS 握手、半死连接无快速失败闸。
+		// 禁 h2 取舍：opencode 单 host、面板级并发 ≤20 连接够用；h2 半死流
+		// 在 300s 头超时下会卡 5 分钟，h1+15s keepalive 探测快速识别死连接。
+		// 代价：>20 并发 SSE 每流新建连接（10s dial 上限兜底）。
+		tr := upstream.NewTransport()
+		tr.ResponseHeaderTimeout = timeout // opencode 口径：默认 300s，可经配置覆盖
 		h.opencodeClientInst = &http.Client{Transport: tr}
 	})
 	return h.opencodeClientInst
@@ -80,6 +94,7 @@ func (h *Handler) opencodeProxy(w http.ResponseWriter, r *http.Request) {
 			"opencode-go 转发通道未启用（opencode.enabled=false）")
 		return
 	}
+	started := time.Now()
 
 	base := strings.TrimSpace(h.cfg.OpenCode.BaseURL)
 	if base == "" {
@@ -104,14 +119,6 @@ func (h *Handler) opencodeProxy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	sess := upstream.SanitizeOpencodeSession(r.Header.Get(upstream.OpencodeSessionHeader))
-	if sess == "" && len(body) > 0 {
-		sess = upstream.SanitizeOpencodeSession(session.ExtractKey(body))
-	}
-	if sess == "" {
-		sess = session.NewMessageID()
-	}
-
 	// 路径重写：/opencode/v1/chat/completions → {base}/chat/completions
 	rel := strings.TrimPrefix(r.URL.Path, openCodePathPrefix)
 	if rel == "" {
@@ -122,24 +129,66 @@ func (h *Handler) opencodeProxy(w http.ResponseWriter, r *http.Request) {
 		target += "?" + r.URL.RawQuery
 	}
 
+	// 仅 POST chat/completions 计用量；/models 等其余路径原样转发不入桶。
+	record := r.Method == http.MethodPost && rel == "/chat/completions"
+
+	// 单次解析：仅「会话头为空需从 body 派生」或「chat 需记账」时 Unmarshal 一次，
+	// 会话键/model/stream/include_usage 注入全复用同一 obj（此前最多 4 次全量解析）。
+	// 解析失败 obj=nil：会话键走随机兜底、model 缺省 "-"、注入不动原字节——与旧语义逐条对齐。
+	sess := upstream.SanitizeOpencodeSession(r.Header.Get(upstream.OpencodeSessionHeader))
+	var obj map[string]any
+	if len(body) > 0 && (sess == "" || record) {
+		_ = json.Unmarshal(body, &obj)
+	}
+	if sess == "" && obj != nil {
+		sess = upstream.SanitizeOpencodeSession(session.ExtractKeyObj(obj))
+	}
+	if sess == "" {
+		sess = session.NewMessageID()
+	}
+
+	var st *chatStat
+	if record {
+		stream, _ := obj["stream"].(bool) // obj=nil 时断言得 false，同旧 peek 失败语义
+		model, _ := obj["model"].(string)
+		if model == "" {
+			model = "-" // 同 parseModelFromBody 缺省口径
+		}
+		st = newChatStatModel(started, len(body), model, stream)
+		st.uid = "opencode"
+		// 挂上 ServeHTTP 入口的请求追踪：reqlog 归档事件与 stdout 流水行共用
+		// 同一份统计/请求 ID/来源，面板「运行日志」据此显示 opencode 请求。
+		if tr := requestTraceFrom(r); tr != nil {
+			tr.stat = st
+			st.requestID = tr.id
+			st.clientIP, st.userAgent = tr.clientIP, tr.userAgent
+		}
+		// 流式补 include_usage 让末帧带 usage；会话键已从原始 obj 派生，不受影响。
+		body = injectOpenCodeUsageObj(obj, body)
+	}
+
 	upReq, err := http.NewRequestWithContext(r.Context(), r.Method, target, bytes.NewReader(body))
 	if err != nil {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid_request", "构造上游请求失败: "+err.Error())
 		return
 	}
 
-	// 入站头全部透传（Authorization 是上游凭据，必须带）；会话头由本层统一重设。
+	// 入站头全部透传（Authorization 可能是上游凭据）；会话头由本层统一重设。
 	copyProxyHeaders(r.Header, upReq.Header)
 	upReq.Header.Del(upstream.OpencodeSessionHeader)
 	upReq.Header.Set(upstream.OpencodeSessionHeader, sess)
 	if upReq.Header.Get("Content-Type") == "" && len(body) > 0 {
 		upReq.Header.Set("Content-Type", "application/json")
 	}
-	// 避免把本网关 api_key 误发给第三方：调用方填了网关 Key 时用环境变量里的
-	// opencode 上游 Key 顶替；完全没给时也用环境变量兜底。
-	if tok := strings.TrimSpace(os.Getenv("OPEN_CODE_TOKEN_PLAN_API_KEY")); tok != "" {
+	// 上游 Key 优先级：配置 opencode.api_key（热快照优先，面板改完即生效）>
+	// 调用方 Authorization > env 兜底（调用方没带或带的是网关 Key 时顶替，
+	// 避免把本网关 api_key 误发给第三方）。
+	live := h.loadLive()
+	if ck := strings.TrimSpace(live.OpenCodeAPIKey); ck != "" {
+		upReq.Header.Set("Authorization", "Bearer "+ck)
+	} else if tok := strings.TrimSpace(os.Getenv("OPEN_CODE_TOKEN_PLAN_API_KEY")); tok != "" {
 		authz := strings.TrimSpace(upReq.Header.Get("Authorization"))
-		gwKey := strings.TrimSpace(h.loadLive().APIKey)
+		gwKey := strings.TrimSpace(live.APIKey)
 		if authz == "" || (gwKey != "" && authz == "Bearer "+gwKey) {
 			upReq.Header.Set("Authorization", "Bearer "+tok)
 		}
@@ -147,6 +196,11 @@ func (h *Handler) opencodeProxy(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.opencodeHTTPClient().Do(upReq)
 	if err != nil {
+		if record {
+			st.status, st.outcome = http.StatusBadGateway, "upstream_error"
+			h.opencodeRecordUsage(st, started)
+			st.done()
+		}
 		writeOpenAIError(w, http.StatusBadGateway, "opencode_upstream",
 			"opencode-go 上游请求失败: "+err.Error())
 		return
@@ -161,9 +215,137 @@ func (h *Handler) opencodeProxy(w http.ResponseWriter, r *http.Request) {
 	if flusher, ok := w.(http.Flusher); ok {
 		flusher.Flush() // SSE 首帧尽快到达客户端
 	}
-	if _, err := io.Copy(w, resp.Body); err != nil {
-		log.Printf("[opencode] 转发响应中断: %v", err)
+
+	var relayErr error
+	if !record {
+		_, relayErr = io.Copy(w, resp.Body)
+	} else if strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
+		// 流式：边透传边抓末帧 usage 与 TTFB，原始字节不变；
+		// relayTo 在每个 SSE 帧边界 Flush，首帧不再滞留服务端写缓冲。
+		sr := newChatStatsReaderSince(resp.Body, started)
+		var flush func()
+		if flusher, ok := w.(http.Flusher); ok {
+			flush = flusher.Flush // 不支持 Flusher 时传 nil，relayTo 只写不刷
+		}
+		relayErr = sr.relayTo(w, flush)
+		d := sr.Usage()
+		st.promptTokens, st.completionTokens, st.totalTokens = d.PromptTokens, d.CompletionTokens, d.TotalTokens
+		st.ttfb = sr.TTFB()
+		if st.totalTokens > 0 {
+			st.toks = int(st.totalTokens)
+		}
+	} else {
+		// 非流式：缓冲响应提取 usage；超上限先写已缓冲部分再透传剩余，放弃解析。
+		var buf []byte
+		buf, relayErr = io.ReadAll(io.LimitReader(resp.Body, openCodeMaxResp+1))
+		if len(buf) > openCodeMaxResp {
+			if _, wErr := w.Write(buf[:openCodeMaxResp]); wErr != nil && relayErr == nil {
+				relayErr = wErr
+			}
+			if _, cErr := io.Copy(w, resp.Body); cErr != nil && relayErr == nil {
+				relayErr = cErr
+			}
+		} else {
+			if _, wErr := w.Write(buf); wErr != nil && relayErr == nil {
+				relayErr = wErr
+			}
+			var obj map[string]any
+			if json.Unmarshal(buf, &obj) == nil {
+				d := usageDeltaFromResponse(obj)
+				st.promptTokens, st.completionTokens, st.totalTokens = d.PromptTokens, d.CompletionTokens, d.TotalTokens
+				if st.totalTokens > 0 {
+					st.toks = int(st.totalTokens)
+				}
+			}
+		}
 	}
+	if relayErr != nil {
+		log.Printf("[opencode] 转发响应中断: %v", relayErr)
+	}
+	if record {
+		st.status = resp.StatusCode
+		switch {
+		case relayErr != nil && r.Context().Err() != nil:
+			// 客户端断连以 r.Context() 为准，不记成上游故障。
+			st.status, st.outcome = 499, "client_gone"
+		case relayErr != nil:
+			st.outcome = "client_closed"
+		case resp.StatusCode >= 200 && resp.StatusCode < 300:
+			st.outcome = reqlog.OutcomeSuccess
+		default:
+			st.outcome = "upstream_error"
+		}
+		h.opencodeRecordUsage(st, started)
+		st.done()
+	}
+}
+
+// injectOpenCodeUsage 给流式请求体补 stream_options.include_usage=true，让上游
+// 在 SSE 末帧带 usage 供用量记账。客户端已显式设置 include_usage（无论 true/false）
+// 则整段不动——false 兼作上游不支持该字段时的逃生门。非法 JSON / 非流式 /
+// 序列化失败都原样返回，不影响转发。
+func injectOpenCodeUsage(body []byte) []byte {
+	var obj map[string]any
+	if json.Unmarshal(body, &obj) != nil {
+		return body
+	}
+	return injectOpenCodeUsageObj(obj, body)
+}
+
+// injectOpenCodeUsageObj obj 版注入：调用方已持有解析结果时复用（单次解析路径），
+// 语义与字节版完全一致——obj=nil（解析失败）/非流式/已显式设置 include_usage
+// 都原样返回 body；仅真正注入时 Marshal 一次。
+func injectOpenCodeUsageObj(obj map[string]any, body []byte) []byte {
+	if obj == nil {
+		return body // 非法 JSON：原样转发，不二次错误化
+	}
+	if stream, _ := obj["stream"].(bool); !stream {
+		return body // 非流式无末帧 usage 可补
+	}
+	opts, _ := obj["stream_options"].(map[string]any)
+	if opts == nil {
+		opts = map[string]any{}
+	}
+	if _, ok := opts["include_usage"]; ok {
+		return body // 客户端显式设置（含 false 逃生门）：整段不动
+	}
+	opts["include_usage"] = true
+	obj["stream_options"] = opts
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return body // 序列化失败（理论上不可能）：原样转发兜底
+	}
+	return out
+}
+
+// opencodeRecordUsage 把 opencode 通道请求写入网关用量桶。opencode 不走 WorkBuddy
+// recordAttempt，缺这一步用量页就没有 opencode 统计。realm/uid 固定 opencode
+// （无号池、单一订阅），model 取请求体的 model；失败尝试同样计数。
+func (h *Handler) opencodeRecordUsage(st *chatStat, started time.Time) {
+	if h.cfg.Usage == nil || st == nil {
+		return
+	}
+	hasUsage := st.totalTokens > 0
+	d := usagepkg.Delta{
+		PromptTokens:     st.promptTokens,
+		HasPromptTokens:  hasUsage,
+		CompletionTokens: st.completionTokens,
+		HasCompletion:    hasUsage,
+		TotalTokens:      st.totalTokens,
+		HasTotal:         hasUsage,
+		HasLatency:       true,
+		LatencyMs:        time.Since(started).Milliseconds(),
+	}
+	if d.LatencyMs < 1 {
+		d.LatencyMs = 1
+	}
+	if hasUsage {
+		if tps, ok := tokensPerSecond(st.completionTokens, time.Since(started), st.ttfb); ok {
+			d.TokensPerSecond, d.HasTPS = tps, true
+		}
+	}
+	h.cfg.Usage.Add(time.Now(), "opencode", "opencode", st.model, d,
+		st.status >= 200 && st.status < 300 && st.outcome == reqlog.OutcomeSuccess)
 }
 
 // copyProxyHeaders 复制 HTTP 头，剔除 hop-by-hop 字段与 Connection 点名的字段。

@@ -78,12 +78,18 @@ type chatStat struct {
 }
 
 // newChatStat 以请求进入 handler 的时刻为起点构造统计对象；toks 默认 -1（usage 缺失）。
+// model 从 body 解析；调用方已持有 model 时用 newChatStatModel 省一次全量 Unmarshal。
 func newChatStat(now time.Time, body []byte, stream bool) *chatStat {
+	return newChatStatModel(now, len(body), parseModelFromBody(body), stream)
+}
+
+// newChatStatModel 以已知 model/body 量级构造统计对象（opencode 单次解析路径复用）。
+func newChatStatModel(now time.Time, bodyLen int, model string, stream bool) *chatStat {
 	mode := "sync"
 	if stream {
 		mode = "stream"
 	}
-	return &chatStat{start: now, model: parseModelFromBody(body), mode: mode, toks: -1, bodyBytes: len(body)}
+	return &chatStat{start: now, model: model, mode: mode, toks: -1, bodyBytes: bodyLen}
 }
 
 // markPrepared 记录入口派生耗时（读 body 完成 → 交给通道 / 进轮转循环前）。
@@ -175,6 +181,13 @@ func (s *chatStatsReader) parseSSELine(line string) {
 		s.seen = true
 		s.ttfb = time.Since(s.start)
 	}
+	// 子串预过滤：纯 content 帧（不含 usage/error 字样）跳过 JSON 解析——
+	// 一条流数百帧绝大多数是 content 帧，逐帧全量 Unmarshal 是无谓 CPU/GC。
+	// 假阳（正文恰好含这两个词）只是多解析一次，无害；假阴仅出现在 \uXXXX
+	// 转义键名（上游不会发），且只影响统计面，不影响透传字节。
+	if !strings.Contains(payload, "usage") && !strings.Contains(payload, "error") {
+		return
+	}
 	var chunk struct {
 		Error json.RawMessage `json:"error"`
 		Usage *struct {
@@ -186,14 +199,16 @@ func (s *chatStatsReader) parseSSELine(line string) {
 			PromptCacheMissTok   *int     `json:"prompt_cache_miss_tokens"`
 		} `json:"usage"`
 	}
-	if json.Unmarshal([]byte(payload), &chunk) != nil || chunk.Usage == nil {
-		if json.Unmarshal([]byte(payload), &chunk) == nil && len(chunk.Error) > 0 {
-			s.errorFrame = true
-		}
+	// 单次 Unmarshal：旧实现对非 usage 帧二次解析查 error 纯冗余
+	// （同 struct 同 payload，首次成功已填 Error、首次失败二次必再失败）。
+	if json.Unmarshal([]byte(payload), &chunk) != nil {
 		return
 	}
 	if len(chunk.Error) > 0 {
 		s.errorFrame = true
+	}
+	if chunk.Usage == nil {
+		return
 	}
 	if chunk.Usage.PromptTokens != nil {
 		s.hasPromptTokens = true
@@ -257,6 +272,43 @@ func (s *chatStatsReader) Read(p []byte) (int, error) {
 		return n, nil
 	}
 	return 0, err
+}
+
+// relayTo 把上游 SSE 原字节逐行透传到 w，并在每个帧边界（空行）Flush 一次。
+// 为什么不用 io.Copy(w, s)：io.Copy 只写不 Flush，小帧会滞留在 net/http 服务端
+// ~4KB 写缓冲里，客户端要等缓冲攒满或流结束才见到首 token（opencode 通道实测
+// 首帧延迟数秒，见 opencode_flush_test.go 时序回归）。trae/qoder/WorkBuddy 通道
+// 均已逐帧 Flush，本方法补齐 opencode 的同一语义。
+// 直读 s.br 不走 Read/pend：避免「行缓存 + io.Copy 中转」双重缓冲；
+// Read 原样保留给 WorkBuddy（upstream.StreamHint 消费方），互不影响。
+// flush 允许 nil（客户端连接不支持 Flusher 时只写不刷）。
+// 写失败立即返回错误，保住调用方 client_gone/client_closed 的判定语义。
+func (s *chatStatsReader) relayTo(w io.Writer, flush func()) error {
+	var relayErr error
+	for {
+		line, err := s.br.ReadString('\n')
+		if line != "" {
+			s.parseSSELine(line) // 统计照旧：TTFB/usage/error 帧（字节不受影响）
+			if _, wErr := io.WriteString(w, line); wErr != nil {
+				return wErr // 客户端断连等写错误：立即上抛，不再读上游
+			}
+			// SSE 帧边界 = 空行（\n 或 \r\n）：写完立即刷，首帧尽快到达客户端。
+			if strings.TrimRight(line, "\r\n") == "" && flush != nil {
+				flush()
+			}
+		}
+		if err != nil {
+			if err != io.EOF {
+				relayErr = err // 非 EOF 读错误上抛；EOF 是流的正常终点
+			}
+			break
+		}
+	}
+	// 流尾补一次 Flush：末帧可能无空行边界（上游掐断/非标尾帧），不留缓冲残尾。
+	if flush != nil {
+		flush()
+	}
+	return relayErr
 }
 
 // rewriteModel 把 outbound chat body 的 model 字段替换为 bare（保留其余字段原样）。
@@ -358,8 +410,8 @@ type requestTrace struct {
 	id    string
 	start time.Time
 	stat  *chatStat
-	// path 本次请求命中的接口路径（/v1/chat/completions 或 /v1/responses），
-	// 供归档事件区分协议入口——两者共用同一条 chat 管线，日志口径必须能分辨。
+	// path 本次请求命中的接口路径（/v1/chat/completions、/v1/responses 或
+	// /opencode/v1/chat/completions），供归档事件区分协议入口——日志口径必须能分辨。
 	path string
 	// 调用来源，进入 handler 时一次性采集（见 ServeHTTP / captureClientInfo）。
 	clientIP  string

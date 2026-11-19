@@ -111,6 +111,38 @@ func TestChatStatsReaderBytesPassthrough(t *testing.T) {
 	}
 }
 
+// TestChatStatsReaderPrefilterNoFalseAccounting 子串预过滤回归：content 正文
+// 恰好含 "usage"/"error" 字样时会被放行解析（假阳），但不得误记账；
+// 真正的 usage 末帧与 error 帧仍照常采信。
+func TestChatStatsReaderPrefilterNoFalseAccounting(t *testing.T) {
+	sse := "data: {\"choices\":[{\"delta\":{\"content\":\"talk about usage and error\"}}]}\n\n" +
+		"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":6,\"total_tokens\":10}}\n\n" +
+		"data: [DONE]\n\n"
+	// 起点回拨 2s：Windows 时钟粒度下纯内存读不足 1ms，time.Since 可能取 0。
+	r := newChatStatsReaderSince(strings.NewReader(sse), time.Now().Add(-2*time.Second))
+	out, _ := io.ReadAll(r)
+	if string(out) != sse {
+		t.Fatalf("字节透传被改动: %q", out)
+	}
+	u := r.Usage()
+	if !u.HasTotalTokens || u.TotalTokens != 10 || u.CompletionTokens != 6 || u.PromptTokens != 4 {
+		t.Fatalf("usage 记账不对: %+v", u)
+	}
+	if r.SawErrorFrame() {
+		t.Fatal("content 含 error 字样不应判为 error 帧")
+	}
+	if r.TTFB() < time.Second {
+		t.Fatal("首个 data 帧必须记 TTFB（预过滤不得跳过 TTFB）")
+	}
+
+	// 真 error 帧仍被识别（单次 Unmarshal 后 Error 字段照常填充）。
+	r2 := newChatStatsReaderSince(strings.NewReader("data: {\"error\":{\"message\":\"boom\"}}\n\n"), time.Now())
+	_, _ = io.ReadAll(r2)
+	if !r2.SawErrorFrame() {
+		t.Fatal("error 帧未被识别")
+	}
+}
+
 func TestRequestMetricsRecordsStream(t *testing.T) {
 	up := newFakeUpstream(t, func(string) (int, string, bool) {
 		return 200, sseOK, true

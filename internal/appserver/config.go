@@ -263,7 +263,8 @@ type Config struct {
 	// Qoder 双区模型通道（qoder-cn:/qoder-intl:/qoder: 前缀）的调度参数。
 	// 账号来自 IDE 号池的 Qoder 登录态，与 WorkBuddy/Trae 的池完全独立。
 	// OpenCode opencode-go 透明转发通道（/opencode/v1/* → opencode.ai/inference/go/v1）。
-	// 不接号池：不参与选号/用量/冷却，Authorization 由调用方提供上游 Key。
+	// 不接号池：不参与选号/冷却；chat/completions 计入网关用量（realm=opencode）。
+	// 上游 Key 优先级：opencode.api_key（热生效）> 调用方 Authorization > env 兜底。
 	// 与 ~/.config/opencode/opencode.json 的 opencode-go provider 配套使用。
 	OpenCode server.OpenCodeConfig `json:"opencode"`
 

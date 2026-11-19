@@ -128,6 +128,58 @@ try {
 	}
 }
 
+// TestAppJSCaTimeDefined 回归闸：b3408a5 删华为面板时把共享的 caTime 一并删掉，
+// 但 Qoder 签到页 3 处仍在调用（上次领到/历史时间/出口更新时间），运行时抛
+// ReferenceError 中断整行渲染，状态永久卡「查询中」。顶层冒烟抓不到它——
+// 该调用在异步渲染回调里，不在顶层求值路径上。这里抽取函数本体直接执行：
+// 函数被删则抽取失败即红，行为变化（空/零值/非法输入必须返回 ''）也红。
+func TestAppJSCaTimeDefined(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed; caTime test skipped")
+	}
+	script := `const fs = require('fs');
+const vm = require('vm');
+const src = fs.readFileSync(process.argv[2], 'utf8');
+const grab = name => {
+  const i = src.indexOf('function ' + name + '(');
+  if (i < 0) throw new Error(name + ' not defined in app.js');
+  const j = src.indexOf('\n}', i);
+  return src.slice(i, j + 2);
+};
+const ctx = { Number, String, Date };
+vm.createContext(ctx);
+vm.runInContext(
+  grab('parseAPITime') + grab('fmtLocalDateTime') + grab('caTime') +
+  '\nthis.caTime = caTime;',
+  ctx
+);
+process.stdout.write(JSON.stringify({
+  valid: ctx.caTime('2026-11-19T08:30:00+08:00'),
+  empty: ctx.caTime(''),
+  zero: ctx.caTime('0001-01-01T00:00:00Z'),
+  garbage: ctx.caTime('not-a-date'),
+}));`
+	f, err := os.CreateTemp(t.TempDir(), "catime-*.cjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(script); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	out, err := exec.Command(node, f.Name(), "app.js").CombinedOutput()
+	if err != nil {
+		t.Fatalf("caTime node test failed: %v\n%s", err, out)
+	}
+	// valid 的期望值按运行机本地时区算，与 fmtLocalDateTime 的语义一致。
+	wantValid := time.Date(2026, 11, 19, 8, 30, 0, 0, time.FixedZone("", 8*3600)).Local().Format("2006-01-02 15:04")
+	want := `{"valid":"` + wantValid + `","empty":"","zero":"","garbage":""}`
+	if strings.TrimSpace(string(out)) != want {
+		t.Fatalf("caTime=%s want %s", out, want)
+	}
+}
+
 // 积分扣除维度的格式必须稳定，且缺样本/缺匹配 Token 时不能伪造比例。
 func TestAppJSCreditDimensionFormatting(t *testing.T) {
 	node, err := exec.LookPath("node")

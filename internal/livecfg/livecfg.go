@@ -19,6 +19,7 @@ type Snapshot struct {
 	SoftCooldown         time.Duration // 429 软冷却基数（<=0 时调用方回退内置默认）
 	SanitizeFingerprints bool          // 出站请求体指纹脱敏
 	RecordClientInfo     bool          // 请求日志是否记录调用来源（客户端 IP / UA）
+	OpenCodeAPIKey       string        // opencode 转发上游 Key；空 = 沿用客户端 Key/env 兜底
 }
 
 // Holder 原子持有当前快照。

@@ -205,6 +205,11 @@ function fmtLocalDateTime(ms) {
   return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' +
     p(d.getHours()) + ':' + p(d.getMinutes());
 }
+// caTime RFC3339 → 「YYYY-MM-DD HH:mm」；空/非法返回 ''（调用方回退显示原始字符串）。
+function caTime(iso) {
+  const ms = parseAPITime(iso);
+  return ms ? fmtLocalDateTime(ms) : '';
+}
 
 /* ── 时间范围控件（用量 / 请求记录共用）────────────────────────────────
    预设项：今天 / 近 24 小时 / 近 3 天 / 近 7 天 / 近 30 天 / 全部历史 / 自定义。
