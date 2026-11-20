@@ -18,8 +18,8 @@ func TestNewTransportHardeningParams(t *testing.T) {
 	if tr.TLSHandshakeTimeout != 10*time.Second {
 		t.Errorf("TLSHandshakeTimeout=%v want 10s", tr.TLSHandshakeTimeout)
 	}
-	if tr.MaxIdleConns != 100 || tr.MaxIdleConnsPerHost != 20 {
-		t.Errorf("MaxIdleConns=%d PerHost=%d want 100/20", tr.MaxIdleConns, tr.MaxIdleConnsPerHost)
+	if tr.MaxIdleConns != 100 || tr.MaxIdleConnsPerHost != 100 {
+		t.Errorf("MaxIdleConns=%d PerHost=%d want 100/100", tr.MaxIdleConns, tr.MaxIdleConnsPerHost)
 	}
 	if tr.IdleConnTimeout != 30*time.Second {
 		t.Errorf("IdleConnTimeout=%v want 30s", tr.IdleConnTimeout)

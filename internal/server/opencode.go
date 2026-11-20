@@ -72,9 +72,9 @@ func (h *Handler) opencodeHTTPClient() *http.Client {
 		// 加固 Transport（单一事实源 upstream.NewTransport）：此前用
 		// DefaultTransport.Clone()，每主机空闲连接仅 2 条且无 dial/TLS 超时，
 		// 并发或空闲后每请求重做 TCP+TLS 握手、半死连接无快速失败闸。
-		// 禁 h2 取舍：opencode 单 host、面板级并发 ≤20 连接够用；h2 半死流
+		// 禁 h2 取舍：opencode 单 host、面板级并发 ≤100 连接够用；h2 半死流
 		// 在 300s 头超时下会卡 5 分钟，h1+15s keepalive 探测快速识别死连接。
-		// 代价：>20 并发 SSE 每流新建连接（10s dial 上限兜底）。
+		// 代价：>100 并发 SSE 每流新建连接（10s dial 上限兜底）。
 		tr := upstream.NewTransport()
 		tr.ResponseHeaderTimeout = timeout // opencode 口径：默认 300s，可经配置覆盖
 		h.opencodeClientInst = &http.Client{Transport: tr}

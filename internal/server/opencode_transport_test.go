@@ -1,7 +1,7 @@
 package server
 
 // opencode_transport_test.go opencode 转发客户端的 Transport 口径回归：
-// 必须走加固构造（禁 h2 / 每主机 20 空闲连接 / dial/TLS 超时），
+// 必须走加固构造（禁 h2 / 每主机 100 空闲连接 / dial/TLS 超时），
 // ResponseHeaderTimeout 按 opencode 配置覆盖（缺省 300s），且不设整体超时。
 
 import (
@@ -33,8 +33,8 @@ func TestOpenCodeTransportHardenedDefault(t *testing.T) {
 	if tr.TLSNextProto == nil || len(tr.TLSNextProto) != 0 {
 		t.Errorf("TLSNextProto=%v want 非nil空map（禁h2）", tr.TLSNextProto)
 	}
-	if tr.MaxIdleConnsPerHost != 20 {
-		t.Errorf("MaxIdleConnsPerHost=%d want 20（DefaultTransport.Clone 默认仅2）", tr.MaxIdleConnsPerHost)
+	if tr.MaxIdleConnsPerHost != 100 {
+		t.Errorf("MaxIdleConnsPerHost=%d want 100（DefaultTransport.Clone 默认仅2）", tr.MaxIdleConnsPerHost)
 	}
 	if tr.TLSHandshakeTimeout != 10*time.Second || tr.DialContext == nil {
 		t.Errorf("TLS握手超时=%v DialContext缺失=%v want 10s/false", tr.TLSHandshakeTimeout, tr.DialContext == nil)
