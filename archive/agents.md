@@ -18,6 +18,7 @@
 | `qoder2api/` | Go | 轻量 Qoder→OpenAI/Claude/Codex 网关（Web 控制台+Bridge，无桌面 GUI），Qoder 协议参照 |
 | `qoder2api-hub/` | Python | Qoder 国内/国际版多账号网关；REALM_CONFIGS 是国内/国际差异的单一权威参照源 |
 | `workbuddy2api-panel/` | Go | 本仓库的历史版本快照（同名早期形态），演进对照 |
+| `panel-legacy-v1/` | HTML + 原生 JS | 面板 v1 单文件前端（`index.html` + `app.js`），T02 从 `internal/panel/` 归档；不再 embed、不参与编译。旧 JS 回归测试经 `legacyV1Asset()` 只读引用，QA 验收通过并获用户拍板后才最终删除 |
 
 ## 3. 关键文件清单
 

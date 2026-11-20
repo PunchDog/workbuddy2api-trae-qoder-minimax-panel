@@ -20,7 +20,7 @@ import (
 //  4. MiniMax 卡片显示「余额 / 总量」（"总量还剩多少"）；
 //  5. Trae 卡片显示的是**真实余额**，签到额度另标。
 func TestCheckinPoolLayoutAligned(t *testing.T) {
-	raw, err := os.ReadFile("app.js")
+	raw, err := os.ReadFile(legacyV1Asset("app.js"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestCheckinPoolLayoutAligned(t *testing.T) {
 	if strings.Contains(wb, "<div>版本</div>") {
 		t.Error("WorkBuddy 表头第二列应是「积分」而不是「版本」")
 	}
-	html, err := os.ReadFile("index.html")
+	html, err := os.ReadFile(legacyV1Asset("index.html"))
 	if err != nil {
 		t.Fatal(err)
 	}

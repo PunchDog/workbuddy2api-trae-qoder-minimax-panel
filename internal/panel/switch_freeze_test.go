@@ -21,7 +21,7 @@ import (
 // readAppJS 读 app.js 原文。
 func readAppJS(t *testing.T) string {
 	t.Helper()
-	raw, err := os.ReadFile("app.js")
+	raw, err := os.ReadFile(legacyV1Asset("app.js"))
 	if err != nil {
 		t.Fatalf("read app.js: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestAppJSAutoRefreshGate(t *testing.T) {
 
 // TestIndexHTMLHasFreezeBar 冻结提示条必须存在（否则用户不知道怎么刷新）。
 func TestIndexHTMLHasFreezeBar(t *testing.T) {
-	raw, err := os.ReadFile("index.html")
+	raw, err := os.ReadFile(legacyV1Asset("index.html"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +233,7 @@ process.exit(0);
 	}
 	hf.Close()
 
-	path, err := filepath.Abs("app.js")
+	path, err := filepath.Abs(legacyV1Asset("app.js"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,12 +3,14 @@
 // Command app 是「单文件分发包」的唯一入口。
 //
 // 一个 exe 同时承担两种角色，靠 --server 参数区分：
-//   - 双击启动（无参数）：启动器 —— 检查 7863 端口，未运行就以 --server 拉起自己，
-//     等端口就绪后打开浏览器面板；已在运行则直接开面板。
+//   - 双击启动（无参数）：启动器 + 桌面壳 —— 检查 7863 端口，未运行就以 --server
+//     拉起自己，等端口就绪后打开 Wails WebView 窗口加载同源 /panel/；已在运行
+//     则直接开窗。关窗只隐藏到托盘，网关独立进程不受影响。
 //   - 内部以 --server 拉起：服务本体 —— 直接跑网关 + 面板（原来 wb2api.exe 的全部行为）。
 //
 // 为什么这样做：分发给别人时只需要给一个 exe，不用再解释「哪个是服务、哪个是启动器、
 // 顺序不能错」。两个进程共用同一个 exe 文件，也不会出现版本不一致。
+// T05 只是把「打开默认浏览器」换成「打开 WebView 窗口」，其余启动流程原样复用。
 //
 // 额外参数：
 //
@@ -18,6 +20,8 @@
 // 编译：
 //
 //	go build -trimpath -ldflags "-s -w -H=windowsgui" -o WorkBuddy2API.exe ./cmd/app
+//
+// 桌面壳实现在 desktop.go（windows && !server），-tags server 时退化为浏览器。
 package main
 
 import (
@@ -81,7 +85,7 @@ func listenAddrFromConfig(cfgPath string) string {
 	return defaultAddr
 }
 
-// dialAddr 把监听地址转成用于探测/打开浏览器的地址（0.0.0.0 换成回环）。
+// dialAddr 把监听地址转成用于探测/打开面板的地址（0.0.0.0 换成回环）。
 func dialAddr(listen string) string {
 	host, port, err := net.SplitHostPort(listen)
 	if err != nil {
@@ -135,7 +139,7 @@ func main() {
 	launch()
 }
 
-// launch 启动器流程：准备目录与配置 → 端口检查 → 拉起服务 → 开面板。
+// launch 启动器流程：准备目录与配置 → 端口检查 → 拉起服务 → 开 WebView 面板。
 func launch() {
 	dir := appdir.Dir()
 	_ = appdir.Chdir()
@@ -184,11 +188,16 @@ func launch() {
 	}
 
 	if !portReady(addr) {
-		messageBox("服务启动超时，7863 端口仍未就绪。\n\n请查看同目录下 data\\server.log 排查。", mbIconError)
+		messageBox("服务启动超时，端口 "+addr+" 仍未就绪。\n\n请查看同目录下 data\\server.log 排查。", mbIconError)
 		return
 	}
 
-	_ = exec.Command("rundll32", "url.dll,FileProtocolHandler", "http://"+addr+"/panel/").Start()
+	// T05：默认模式打开 Wails WebView 窗口；窗口只提供原生外壳，
+	// 面板与 API 全部由隐藏网关在同源 http://<addr>/panel/ 提供。
+	panelURL := "http://" + addr + "/panel/"
+	if err := startDesktop(panelURL, stopServer, appTitle); err != nil {
+		messageBox("桌面面板启动失败：\n"+err.Error()+"\n\n可改用浏览器访问 "+panelURL, mbIconError)
+	}
 }
 
 // stopServer 停止服务：优先用 pid 文件，兜底按监听端口反查 PID。

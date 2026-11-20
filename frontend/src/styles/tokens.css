@@ -1,0 +1,58 @@
+/*
+ * tokens.css —— 面板视觉令牌的唯一色值来源（PRD §4.2）。
+ *
+ * 暗色为默认（:root），亮色为 [data-theme='light']；组件内禁止写死色值，
+ * 一律使用 var(--wb-*)。tdesign 的品牌/成功/警告/危险色同步映射到同一套令牌，
+ * 保证 Table/Dialog/Form/Select 与冷石墨仪表盘一致。
+ */
+
+:root {
+  color-scheme: dark;
+
+  --bg: #0c0e14;
+  --surface: #14171f;
+  --surface-2: #1a1e28;
+  --line: #262c3a;
+  --ink: #e8ebf2;
+  --ink-2: #a8b0c2;
+  --ink-3: #6b7488;
+  --accent: #5b7cfa;
+  --ok: #3ddc97;
+  --warn: #f5b544;
+  --bad: #f0655f;
+
+  /* 数值统一等宽数字，KPI 卡左侧语义轨宽度 */
+  --wb-tabular: tabular-nums;
+  --wb-kpi-rail: 3px;
+  --wb-radius: 6px;
+  --wb-font-size: 14px;
+
+  /* tdesign 语义映射（由 ConfigProvider 的 CSS 变量消费） */
+  --td-brand-color: var(--accent);
+  --td-success-color: var(--ok);
+  --td-warning-color: var(--warn);
+  --td-error-color: var(--bad);
+  --td-bg-color-page: var(--bg);
+  --td-bg-color-container: var(--surface);
+  --td-bg-color-container-hover: var(--surface-2);
+  --td-border-level-1-color: var(--line);
+  --td-text-color-primary: var(--ink);
+  --td-text-color-secondary: var(--ink-2);
+  --td-text-color-placeholder: var(--ink-3);
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+
+  --bg: #f4f5f8;
+  --surface: #ffffff;
+  --surface-2: #f8f9fb;
+  --line: #e2e5ec;
+  --ink: #14171f;
+  --ink-2: #545c6e;
+  --ink-3: #8b93a5;
+  --accent: #3d5fe0;
+  --ok: #0f9d63;
+  --warn: #b47611;
+  --bad: #cf3b34;
+}

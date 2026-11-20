@@ -1,0 +1,74 @@
+# 构建链入口（架构 §2.3.1 / §5）。
+# 用法：wails3 task <name> 或系统 task <name>。
+version: '3'
+
+vars:
+  FRONTEND_DIR: frontend
+
+tasks:
+  default:
+    desc: 列出所有可用任务
+    cmds:
+      - task --list
+
+  frontend:dev:
+    desc: Vite 热更新（127.0.0.1:9245，/panel/api 代理到 127.0.0.1:7863）
+    cmds:
+      - npm --prefix {{.FRONTEND_DIR}} run dev
+
+  dev:
+    desc: Wails 窗口 + Vite 热更新（dev 期窗口 URL 走 WAILS_VITE_PORT）
+    cmds:
+      - wails3 dev
+
+  frontend:build:
+    desc: 构建 Vue 产物到 frontend/dist（供 go:embed 使用）
+    cmds:
+      - npm --prefix {{.FRONTEND_DIR}} run build
+
+  frontend:typecheck:
+    desc: vue-tsc 类型检查
+    cmds:
+      - npm --prefix {{.FRONTEND_DIR}} run typecheck
+
+  run:
+    desc: 桌面运行（构建前端 + 启动 Wails WebView 壳，Windows/CGO=1）
+    env:
+      CGO_ENABLED: '1'
+    cmds:
+      - task: frontend:build
+      - go run -trimpath -tags production ./cmd/app
+
+  build:server:
+    desc: 无头网关（Linux/CI/Docker，CGO_ENABLED=0）
+    env:
+      GOOS: linux
+      CGO_ENABLED: '0'
+    cmds:
+      - go build -trimpath -tags server -o bin/wb2api ./cmd/server
+
+  build:desktop:
+    desc: 桌面 exe（Windows + CGO_ENABLED=1，前端 dist 由 go:embed 提供）
+    env:
+      CGO_ENABLED: '1'
+    cmds:
+      - task: frontend:build
+      - go build -trimpath -tags production -ldflags "-s -w -H=windowsgui" -o dist/WorkBuddy2API.exe ./cmd/app
+
+  build:
+    desc: 前端产物 + 桌面壳 + 无头网关（frontend:build 由 build:desktop 承担，避免重复构建）
+    cmds:
+      - task: build:desktop
+      - task: build:server
+
+  test:
+    desc: 全量校验（Go 测试/vet + Vitest）
+    cmds:
+      - go test ./internal/... ./frontend/... ./cmd/... -count=1
+      - go vet ./internal/... ./frontend/... ./cmd/...
+      - npm --prefix {{.FRONTEND_DIR}} run test -- --run
+
+  doctor:
+    desc: 工具链体检（需 wails3 CLI v3）
+    cmds:
+      - wails3 doctor

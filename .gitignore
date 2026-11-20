@@ -36,6 +36,10 @@ docs/
 !README.md
 # go:embed 的默认系统提示词是构建依赖，必须进版本库（漏了会导致 GitHub 上编译失败）
 !internal/prompt/defaultprompt.md
+!frontend/agents.md
+# 交付文档（架构/PRD/QA 报告）必须可入库
+!deliverables/
+!deliverables/**
 
 # Windows binaries
 /wb2api.exe
@@ -62,3 +66,13 @@ archive/**/config.json
 archive/**/auths/
 archive/**/credentials/
 .qoder-credits/
+
+# Frontend (Vue3 + Vite) —— node_modules 不入库，dist 只保留 embed 占位文件
+frontend/node_modules/
+frontend/dist/*
+!frontend/dist/.gitkeep
+
+# Wails / Go 构建产物（server exe 与桌面 exe）
+/bin/
+/dist/
+*.exe

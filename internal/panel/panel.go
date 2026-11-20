@@ -189,7 +189,7 @@ func (p *Panel) Logs() *Ring { return p.logs }
 
 func (p *Panel) routes() {
 	p.mux.HandleFunc("GET /panel/{$}", p.index)
-	p.mux.HandleFunc("GET /panel/app.js", p.appScript)
+	p.mux.HandleFunc("GET /panel/assets/{path...}", p.assets)
 	p.mux.HandleFunc("GET /panel/api/overview", p.withAuth(p.overview))
 	p.mux.HandleFunc("GET /panel/api/logs", p.withAuth(p.logsHandler))
 	p.mux.HandleFunc("GET /panel/api/request_metrics", p.withAuth(p.requestMetrics))
@@ -311,6 +311,7 @@ func (p *Panel) routes() {
 	// 三项缺陷修复新增的契约端点（T11）：集中接线，不改任何业务逻辑。
 	// 方法/路径见计划 2.2.4 C-CA-API@1、2.2.11 C-QD-API@1、2.2.14 C-WB-DIAG@1。
 	p.registerRepairRoutes(p.mux)
+	p.registerStatsRoutes(p.mux)
 }
 
 // ServeHTTP 统一入口：先写安全响应头再分发，保证页面、静态资源、API

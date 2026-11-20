@@ -18,7 +18,7 @@ func TestSecurityHeadersOnAllPanelResponses(t *testing.T) {
 	p := newTestPanel()
 	paths := []struct{ method, path string }{
 		{"GET", "/panel/"},
-		{"GET", "/panel/app.js"},
+		{"GET", "/panel/assets/missing.js"},
 		{"GET", "/panel/api/overview"}, // 401（未提供 key）
 		{"POST", "/panel/api/config"},  // 401
 		{"GET", "/panel/api/nonexistent"},
@@ -64,16 +64,15 @@ func TestCSPDisallowsInlineScriptAndFraming(t *testing.T) {
 	}
 }
 
-// 页面必须引用外部脚本（内联脚本会被上面的 CSP 拦掉，页面将完全不可用）。
-// 允许 ?v=构建指纹 查询串（缓存治理，见 index.go）——同源外部脚本的 CSP 语义不变。
+// 页面必须引用 Vite 构建产物里的外部 ES module（内联脚本会被 CSP 拦掉）。
 func TestIndexReferencesExternalScript(t *testing.T) {
 	p := newTestPanel()
 	rec := httptest.NewRecorder()
 	p.ServeHTTP(rec, httptest.NewRequest("GET", "/panel/", nil))
 	body := rec.Body.String()
 
-	if !regexp.MustCompile(`<script src="app\.js(\?v=[a-f0-9]+)?"></script>`).MatchString(body) {
-		t.Error("index.html must load app.js externally (inline script is blocked by CSP)")
+	if !regexp.MustCompile(`<script type="module"[^>]+src="/panel/assets/[^"]+\.js"`).MatchString(body) {
+		t.Error("index.html must load hashed /panel/assets/*.js externally (inline script is blocked by CSP)")
 	}
 	// 反例保护：出现内联 <script>...</script> 内容块即为回归
 	if strings.Contains(body, "<script>\n") || strings.Contains(body, "<script> ") {
@@ -81,19 +80,13 @@ func TestIndexReferencesExternalScript(t *testing.T) {
 	}
 }
 
-// app.js 必须能作为同源脚本取到且类型正确（否则页面白屏）。
-func TestAppScriptServed(t *testing.T) {
+// 旧 app.js 路由必须已下线（资源改由 /panel/assets/* 提供）。
+func TestLegacyAppScriptRouteGone(t *testing.T) {
 	p := newTestPanel()
 	rec := httptest.NewRecorder()
 	p.ServeHTTP(rec, httptest.NewRequest("GET", "/panel/app.js", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("code=%d want 200", rec.Code)
-	}
-	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "javascript") {
-		t.Errorf("Content-Type=%q want javascript", ct)
-	}
-	if !strings.Contains(rec.Body.String(), "'use strict'") {
-		t.Error("app.js body looks wrong")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("/panel/app.js code=%d want 404", rec.Code)
 	}
 }
 

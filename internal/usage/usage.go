@@ -514,6 +514,10 @@ func (w Window) bounds() (time.Time, time.Time) {
 	return time.Now().Truncate(time.Hour).Add(-time.Duration(h-1) * time.Hour), time.Time{}
 }
 
+// Bounds 暴露实际生效的 [from, to] 给只读统计端点（面板层补零点与回显区间用）。
+// 与 SnapshotWindow 使用的是同一个 bounds()，保证两侧窗口口径不漂移。
+func (w Window) Bounds() (time.Time, time.Time) { return w.bounds() }
+
 // bucketTime 把桶 scope 解析成本地时间；脏 scope 返回 false（不进任何口径）。
 func bucketTime(scope string) (time.Time, bool) {
 	if strings.HasPrefix(scope, "h:") {
@@ -552,6 +556,13 @@ func (r *Recorder) SnapshotWithRates(hours int, nicks map[string]string, current
 // 生效"，已废弃）。小时桶按整点入窗；日桶（Rollup 折叠出的长期数据）按日起点入窗，
 // 故小时窗口天然不含更早的日桶。
 func (r *Recorder) SnapshotWindow(w Window, nicks map[string]string, currentRate func(realm, model string) string) Snapshot {
+	return r.snapshotWindow(w, nicks, currentRate, "")
+}
+
+// snapshotWindow 是 SnapshotWindow 与 stats.go/SeriesWindow 的共用聚合实现：
+// 两条口径走同一份代码，避免趋势图与用量卡片各自维护一份聚合而漂移。
+// realm 非空时只统计该通道的桶——opencode 等独立通道不会被并入号池口径。
+func (r *Recorder) snapshotWindow(w Window, nicks map[string]string, currentRate func(realm, model string) string, realm string) Snapshot {
 	if r == nil {
 		return Snapshot{Generated: time.Now().Format(time.RFC3339)}
 	}
@@ -586,6 +597,9 @@ func (r *Recorder) SnapshotWindow(w Window, nicks map[string]string, currentRate
 	matched := 0
 	for i := range bs {
 		b := &bs[i]
+		if realm != "" && b.Realm != realm {
+			continue
+		}
 		if b.Scope < since || since == "" {
 			since = b.Scope
 		}

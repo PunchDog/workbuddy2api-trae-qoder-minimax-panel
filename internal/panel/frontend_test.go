@@ -25,7 +25,7 @@ func TestAppJSSyntax(t *testing.T) {
 	if err != nil {
 		t.Skip("node not available; skipping JS syntax check")
 	}
-	path, err := filepath.Abs("app.js")
+	path, err := filepath.Abs(legacyV1Asset("app.js"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ try {
 	}
 	hf.Close()
 	for _, hash := range []string{"#taskscenter", "#accounts", "#usage", "#models", "#config", "#logs", "#packages"} {
-		cmd := exec.Command(node, hf.Name(), "app.js")
+		cmd := exec.Command(node, hf.Name(), legacyV1Asset("app.js"))
 		cmd.Dir = "." // 测试工作目录 = internal/panel
 		cmd.Env = append(os.Environ(), "SMOKE_HASH="+hash)
 		out, err := cmd.CombinedOutput()
@@ -168,7 +168,7 @@ process.stdout.write(JSON.stringify({
 		t.Fatal(err)
 	}
 	f.Close()
-	out, err := exec.Command(node, f.Name(), "app.js").CombinedOutput()
+	out, err := exec.Command(node, f.Name(), legacyV1Asset("app.js")).CombinedOutput()
 	if err != nil {
 		t.Fatalf("caTime node test failed: %v\n%s", err, out)
 	}
@@ -217,7 +217,7 @@ process.stdout.write(JSON.stringify({
 		t.Fatal(err)
 	}
 	f.Close()
-	out, err := exec.Command(node, f.Name(), "app.js").CombinedOutput()
+	out, err := exec.Command(node, f.Name(), legacyV1Asset("app.js")).CombinedOutput()
 	if err != nil {
 		t.Fatalf("credit formatting node test failed: %v\n%s", err, out)
 	}
@@ -261,7 +261,7 @@ process.stdout.write(JSON.stringify({
 		t.Fatal(err)
 	}
 	f.Close()
-	out, err := exec.Command(node, f.Name(), "app.js").CombinedOutput()
+	out, err := exec.Command(node, f.Name(), legacyV1Asset("app.js")).CombinedOutput()
 	if err != nil {
 		t.Fatalf("rate-limit formatting node test failed: %v\n%s", err, out)
 	}
@@ -311,7 +311,7 @@ process.stdout.write(JSON.stringify({
 		t.Fatal(err)
 	}
 	f.Close()
-	out, err := exec.Command(node, f.Name(), "app.js").CombinedOutput()
+	out, err := exec.Command(node, f.Name(), legacyV1Asset("app.js")).CombinedOutput()
 	if err != nil {
 		t.Fatalf("request log formatting node test failed: %v\n%s", err, out)
 	}
@@ -361,7 +361,7 @@ process.stdout.write(JSON.stringify({
 		t.Fatal(err)
 	}
 	f.Close()
-	out, err := exec.Command(node, f.Name(), "app.js").CombinedOutput()
+	out, err := exec.Command(node, f.Name(), legacyV1Asset("app.js")).CombinedOutput()
 	if err != nil {
 		t.Fatalf("request filter node test failed: %v\n%s", err, out)
 	}
@@ -404,7 +404,7 @@ process.stdout.write(JSON.stringify({
 		t.Fatal(err)
 	}
 	f.Close()
-	out, err := exec.Command(node, f.Name(), "app.js").CombinedOutput()
+	out, err := exec.Command(node, f.Name(), legacyV1Asset("app.js")).CombinedOutput()
 	if err != nil {
 		t.Fatalf("outcome tag node test failed: %v\n%s", err, out)
 	}
@@ -466,7 +466,7 @@ process.stdout.write(JSON.stringify({
 		t.Fatal(err)
 	}
 	f.Close()
-	out, err := exec.Command(node, f.Name(), "app.js").CombinedOutput()
+	out, err := exec.Command(node, f.Name(), legacyV1Asset("app.js")).CombinedOutput()
 	if err != nil {
 		t.Fatalf("model filter node test failed: %v\n%s", err, out)
 	}
@@ -544,7 +544,7 @@ process.stdout.write(JSON.stringify({
 		t.Fatal(err)
 	}
 	f.Close()
-	out, err := exec.Command(node, f.Name(), "app.js").CombinedOutput()
+	out, err := exec.Command(node, f.Name(), legacyV1Asset("app.js")).CombinedOutput()
 	if err != nil {
 		t.Fatalf("usage chart node test failed: %v\n%s", err, out)
 	}
@@ -618,7 +618,7 @@ process.stdout.write(JSON.stringify({
 		t.Fatal(err)
 	}
 	f.Close()
-	cmd := exec.Command(node, f.Name(), "app.js")
+	cmd := exec.Command(node, f.Name(), legacyV1Asset("app.js"))
 	// 两侧都固定用 UTC：node 子进程的 TZ 显式设成 UTC（Windows 上 node 认 TZ、
 	// Go 不认，两边不统一时「本地时刻 → epoch」的断言会随时区假失败），Go 侧的
 	// 期望值同样按 UTC 算。测的是「自定义区间 → from/to epoch」的映射本身，
@@ -653,12 +653,12 @@ process.stdout.write(JSON.stringify({
 // 少了一个开关而 Go 测试全绿，只有人肉点开配置页才会发现。这里把"表单字段 ↔
 // CFG_MAP"与"关键热改键必须在表单里"两条都钉住。
 func TestConfigFormMatchesCFGMap(t *testing.T) {
-	src, err := os.ReadFile("app.js")
+	src, err := os.ReadFile(legacyV1Asset("app.js"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	js := string(src)
-	htmlBytes, err := os.ReadFile("index.html")
+	htmlBytes, err := os.ReadFile(legacyV1Asset("index.html"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -751,7 +751,7 @@ process.stdout.write(JSON.stringify({
 		t.Fatal(err)
 	}
 	f.Close()
-	out, err := exec.Command(node, f.Name(), "app.js").CombinedOutput()
+	out, err := exec.Command(node, f.Name(), legacyV1Asset("app.js")).CombinedOutput()
 	if err != nil {
 		t.Fatalf("detail groups node test failed: %v\n%s", err, out)
 	}
@@ -803,7 +803,7 @@ process.stdout.write(JSON.stringify({
 		t.Fatal(err)
 	}
 	f.Close()
-	out, err := exec.Command(node, f.Name(), "app.js").CombinedOutput()
+	out, err := exec.Command(node, f.Name(), legacyV1Asset("app.js")).CombinedOutput()
 	if err != nil {
 		t.Fatalf("expiry summary node test failed: %v\n%s", err, out)
 	}
@@ -863,7 +863,7 @@ process.stdout.write(JSON.stringify([
 		t.Fatal(err)
 	}
 	f.Close()
-	out, err := exec.Command(node, f.Name(), "app.js").CombinedOutput()
+	out, err := exec.Command(node, f.Name(), legacyV1Asset("app.js")).CombinedOutput()
 	if err != nil {
 		t.Fatalf("collectConfig node test failed: %v\n%s", err, out)
 	}
@@ -927,7 +927,7 @@ process.stdout.write(JSON.stringify(names));`
 		t.Fatal(err)
 	}
 	f.Close()
-	out, err := exec.Command(node, f.Name(), "app.js").CombinedOutput()
+	out, err := exec.Command(node, f.Name(), legacyV1Asset("app.js")).CombinedOutput()
 	if err != nil {
 		t.Fatalf("expiry sort node test failed: %v\n%s", err, out)
 	}
@@ -1004,7 +1004,7 @@ process.stdout.write(JSON.stringify({
 		t.Fatal(err)
 	}
 	f.Close()
-	out, err := exec.Command(node, f.Name(), "app.js").CombinedOutput()
+	out, err := exec.Command(node, f.Name(), legacyV1Asset("app.js")).CombinedOutput()
 	if err != nil {
 		t.Fatalf("expiry snapshot node test failed: %v\n%s", err, out)
 	}
@@ -1024,7 +1024,7 @@ process.stdout.write(JSON.stringify({
 // 说明：积分页改版后，到期卡片骨架 id 由 expBox/expList 换成 pkExpiry
 // （见「WorkBuddy 积分到期分布」卡片），断言随之指向新 id；语义不变。
 func TestPanelIndexExpiryBoxNotHidden(t *testing.T) {
-	b, err := os.ReadFile("index.html")
+	b, err := os.ReadFile(legacyV1Asset("index.html"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1100,7 +1100,7 @@ process.stdout.write(JSON.stringify({
 		t.Fatal(err)
 	}
 	f.Close()
-	out, err := exec.Command(node, f.Name(), "app.js").CombinedOutput()
+	out, err := exec.Command(node, f.Name(), legacyV1Asset("app.js")).CombinedOutput()
 	if err != nil {
 		t.Fatalf("chart tooltip node test failed: %v\n%s", err, out)
 	}
@@ -1131,7 +1131,7 @@ func runNodeScript(t *testing.T, name, script string) string {
 		t.Fatal(err)
 	}
 	f.Close()
-	out, err := exec.Command(node, f.Name(), "app.js").CombinedOutput()
+	out, err := exec.Command(node, f.Name(), legacyV1Asset("app.js")).CombinedOutput()
 	if err != nil {
 		t.Fatalf("%s node test failed: %v\n%s", name, err, out)
 	}
@@ -1142,11 +1142,11 @@ func runNodeScript(t *testing.T, name, script string) string {
 // Qoder 设备/出口与历史、任务中心错误横幅。
 // 同时钉住被明令禁止的无路径承诺文案。
 func TestFrontendRepairContractAnchors(t *testing.T) {
-	js, err := os.ReadFile("app.js")
+	js, err := os.ReadFile(legacyV1Asset("app.js"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	html, err := os.ReadFile("index.html")
+	html, err := os.ReadFile(legacyV1Asset("index.html"))
 	if err != nil {
 		t.Fatal(err)
 	}

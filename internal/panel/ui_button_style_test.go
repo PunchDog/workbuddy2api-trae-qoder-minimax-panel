@@ -21,7 +21,7 @@ import (
 //   · 已经签到 → 灰底 `xs` + disabled「已签到」
 //   · 状态徽章另说（徽章讲上游核实的细节，按钮管能不能点）
 func TestCheckinButtonStyleIsUniform(t *testing.T) {
-	raw, err := os.ReadFile("app.js")
+	raw, err := os.ReadFile(legacyV1Asset("app.js"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,27 +4,23 @@ title WorkBuddy2API Panel
 
 cd /d "%~dp0"
 
-if not exist "config.json" (
-    echo [ERROR] config.json not found. Copy config.example.json to config.json first.
-    pause
-    exit /b 1
-)
-
-if not exist "wb2api.exe" (
-    echo [ERROR] wb2api.exe not found in this folder.
+if not exist "dist\WorkBuddy2API.exe" (
+    echo [ERROR] dist\WorkBuddy2API.exe not found. Run build.bat first.
     pause
     exit /b 1
 )
 
 echo ============================================
-echo   WorkBuddy2API Gateway
-echo   Panel: http://127.0.0.1:7863/panel/
-echo   Press Ctrl+C to stop
+echo   WorkBuddy2API Desktop Panel
+echo   Launcher starts a hidden gateway, then opens the WebView window.
+echo   Panel is also available in a browser:
+echo     http://127.0.0.1:7863/panel/
+echo   Closing the window hides it to tray; use tray menu to stop gateway or quit.
 echo ============================================
 echo.
 
-wb2api.exe -config config.json
+start "" "dist\WorkBuddy2API.exe"
 
-echo.
-echo [EXIT] service stopped
-pause
+echo [OK] desktop panel launched. This command window can be closed.
+timeout /t 3 >nul
+exit /b 0

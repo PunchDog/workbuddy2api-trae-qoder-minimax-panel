@@ -1,0 +1,327 @@
+/*
+ * app.css —— 三段式布局壳与 tdesign 暗色可读性覆写。
+ * 所有色值来自 tokens.css；本文件只负责结构与组件适配，不引入新色值。
+ */
+@import './tokens.css';
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-size: var(--wb-font-size);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  font-variant-numeric: var(--wb-tabular);
+  -webkit-font-smoothing: antialiased;
+}
+
+.wb-shell {
+  display: grid;
+  grid-template-columns: 208px minmax(0, 1fr);
+  grid-template-rows: 32px minmax(0, 1fr);
+  grid-template-areas:
+    'brand titlebar'
+    'nav content';
+  height: 100vh;
+  overflow: hidden;
+}
+
+.wb-brand {
+  grid-area: brand;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  background: var(--surface-2);
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  user-select: none;
+}
+
+.wb-brand-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.wb-titlebar {
+  grid-area: titlebar;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+
+.wb-titlebar-title {
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.wb-titlebar-spacer {
+  flex: 1;
+}
+
+.wb-nav {
+  grid-area: nav;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 8px;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+}
+
+.wb-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: var(--wb-radius);
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-nav-item-glyph {
+  width: 16px;
+  text-align: center;
+  color: var(--ink-3);
+}
+
+.wb-nav-item.is-active .wb-nav-item-glyph {
+  color: var(--accent);
+}
+
+.wb-nav-item:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.wb-range-select {
+  width: 110px;
+}
+
+.wb-nav-item.is-active {
+  background: var(--surface-2);
+  color: var(--accent);
+  box-shadow: inset var(--wb-kpi-rail) 0 0 var(--accent);
+}
+
+.wb-content {
+  grid-area: content;
+  padding: 16px;
+  overflow: auto;
+  min-width: 0;
+}
+
+.wb-view-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.wb-view-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.wb-view-note {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+.wb-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.wb-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--wb-radius);
+  padding: 14px;
+  min-width: 0;
+}
+
+.wb-card-title {
+  color: var(--ink-2);
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.wb-card-value {
+  color: var(--ink);
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: var(--wb-tabular);
+}
+
+.wb-kpi-rail {
+  border-left: var(--wb-kpi-rail) solid var(--accent);
+  padding-left: 10px;
+}
+
+.wb-placeholder {
+  color: var(--ink-3);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.wb-loading-bar {
+  height: 2px;
+  margin-bottom: 10px;
+  background: var(--accent);
+  animation: wb-loading-pulse 1s ease-in-out infinite;
+}
+
+@keyframes wb-loading-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.wb-error {
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  border-left: var(--wb-kpi-rail) solid var(--bad);
+  background: var(--surface-2);
+  color: var(--bad);
+  border-radius: var(--wb-radius);
+  font-size: 13px;
+}
+
+/* tdesign 组件在暗色下的可读性覆写：只改变量与背景，不新增色值。 */
+.t-table,
+.t-dialog,
+.t-dialog__body,
+.t-select__dropdown,
+.t-input,
+.t-tag {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.t-table th,
+.t-table .t-table__th-cell-inner {
+  background: var(--surface-2) !important;
+  color: var(--ink-2) !important;
+}
+
+.t-table td {
+  border-bottom-color: var(--line) !important;
+}
+
+.t-dialog__header,
+.t-dialog__footer {
+  background: var(--surface) !important;
+  color: var(--ink) !important;
+}
+
+.t-button--theme-primary {
+  --td-brand-color: var(--accent);
+}
+
+@media (max-width: 900px) {
+  .wb-shell {
+    grid-template-columns: 56px minmax(0, 1fr);
+  }
+
+  .wb-brand-label,
+  .wb-nav-item-label {
+    display: none;
+  }
+
+  .wb-brand,
+  .wb-nav-item {
+    justify-content: center;
+  }
+}
+
+/* ── T07 图表卡片 ───────────────────────────────────────────────
+   图表区三列自适应；色值全部来自 tokens.css，组件内不写死颜色。 */
+.wb-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.wb-chart-card {
+  min-width: 0;
+  padding: 10px 12px 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--wb-radius);
+}
+
+.wb-chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 24px;
+  margin-bottom: 4px;
+}
+
+.wb-chart-tools {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.wb-chart-select {
+  max-width: 92px;
+  padding: 2px 4px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 12px;
+  font-variant-numeric: var(--wb-tabular);
+}
+
+.wb-chart-note {
+  color: var(--ink-3);
+  font-size: 11.5px;
+  line-height: 1.5;
+  margin-top: 4px;
+}
+
+.wb-chart-warn {
+  color: var(--warn);
+  font-size: 11.5px;
+  line-height: 1.5;
+  margin-top: 4px;
+}

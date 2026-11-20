@@ -24,7 +24,7 @@ import (
 //  2. 存在「全部签到」按钮，且调用时不带 email（= 号池全部）；
 //  3. 每行额度按账号查询（usage?email=），不再只查当前号。
 func TestQoderCheckinUIListsAllAccounts(t *testing.T) {
-	raw, err := os.ReadFile("app.js")
+	raw, err := os.ReadFile(legacyV1Asset("app.js"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestQoderCheckinUIListsAllAccounts(t *testing.T) {
 	}
 
 	// 全部签到按钮
-	html, err := os.ReadFile("index.html")
+	html, err := os.ReadFile(legacyV1Asset("index.html"))
 	if err != nil {
 		t.Fatal(err)
 	}
