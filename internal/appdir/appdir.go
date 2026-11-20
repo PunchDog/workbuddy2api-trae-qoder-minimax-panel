@@ -1,32 +1,69 @@
-// Package appdir 统一解析数据目录路径。
+// Package appdir 统一解析「程序自己的目录」。
 //
-// 基准统一为进程当前工作目录（cwd），与 config.json（./config.json）同基准：
-// 配置、号池、用量等运行期文件要么一起落在启动目录，要么一起落在容器 WORKDIR，
-// 不会出现「面板改了 ./config.json、号池却写进 exe 所在目录」的双基准分家。
+// 为什么需要：分发给别人后用户可能是双击 exe、用 start-panel.bat（脚本会先
+// cd /d 到项目根目录）或从快捷方式启动（工作目录可能是 C:\Windows\System32）。
+// 若按启动者的 cwd 解析相对路径，config.json、data/ 下的 pid/log 与号池就会
+// 各读各的、写到莫名其妙的地方，表现为「面板改了配置但服务读的是另一份」。
 //
-// 因此从快捷方式启动桌面 exe 时，请把「起始位置/工作目录」固定为 exe 目录或
-// 某个固定可写目录（Docker 用 WORKDIR /app），确保 cwd 有写权限；
-// 若落在只读目录（如 C:\Windows\System32），配置与号池都会写入失败。
+// 因此这里以 exe 所在目录为唯一基准：启动时 cmd/app 调用 Chdir() 把 cwd 切到
+// exe 目录，于是 config.json（./config.json）、data/（pid/log）与号池数据
+// （Resolve）统一落在 exe 旁，配置与数据不分家。
+//
+// 注意：exe 需放在可写目录；若所在目录只读，配置与号池都会写入失败。
+// Docker 走 cmd/server + WORKDIR /app + 显式 -config /app/config.json，
+// 不经过本入口，绝对路径优先，不受 Chdir 影响。
 package appdir
 
 import (
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 )
 
-// Dir 返回当前工作目录（获取失败时回落 "."）。
-//
-// 每次调用都读 os.Getwd()，不做缓存：config.json 也是相对 cwd 逐次解析的，
-// 一旦缓存就可能在 cwd 变化后再次与配置分家。
+var (
+	once sync.Once
+	dir  string
+)
+
+// Dir 返回程序所在目录（exe 同级）。
+// go run / go test 场景下 exe 落在临时构建目录里，此时回落当前工作目录。
 func Dir() string {
-	wd, err := os.Getwd()
-	if err != nil || wd == "" {
-		return "."
-	}
-	return wd
+	once.Do(func() {
+		if p, err := os.Executable(); err == nil {
+			if real, lerr := filepath.EvalSymlinks(p); lerr == nil {
+				p = real
+			}
+			d := filepath.Dir(p)
+			if d != "" && !isTempBuildDir(d) {
+				dir = d
+				return
+			}
+		}
+		wd, err := os.Getwd()
+		if err != nil || wd == "" {
+			wd = "."
+		}
+		dir = wd
+	})
+	return dir
 }
 
-// Resolve 把相对路径按当前工作目录解析成绝对路径；绝对路径与空串原样返回。
+// isTempBuildDir 判断是否 go run / go test 的临时构建目录。
+func isTempBuildDir(d string) bool {
+	lower := strings.ToLower(filepath.Clean(d))
+	if strings.Contains(lower, "go-build") {
+		return true
+	}
+	if t := os.TempDir(); t != "" {
+		if strings.HasPrefix(lower, strings.ToLower(filepath.Clean(t))) {
+			return true
+		}
+	}
+	return false
+}
+
+// Resolve 把相对路径按程序目录解析成绝对路径；绝对路径与空串原样返回。
 func Resolve(p string) string {
 	if p == "" {
 		return ""
@@ -37,7 +74,10 @@ func Resolve(p string) string {
 	return filepath.Join(Dir(), p)
 }
 
-// Chdir 保留仅为兼容旧调用方：cwd 本身就是基准，无需切换。
+// Chdir 把当前工作目录切到程序目录。
+//
+// 服务内部仍有少量相对路径（config 里的 ./auths、./data/state.json 等），
+// 启动时统一对齐到 exe 目录，可以一次性兜住这些历史写法。
 func Chdir() error {
-	return nil
+	return os.Chdir(Dir())
 }

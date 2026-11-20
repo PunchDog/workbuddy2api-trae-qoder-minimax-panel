@@ -18,9 +18,9 @@ type QoderPoolFile struct {
 	Accounts []*QoderSnapshot `json:"accounts"`
 }
 
-// PoolDir 返回号池保存目录（默认 <当前工作目录>/data/ide_accounts，IDEAUTH_POOL_DIR 可覆盖）。
+// PoolDir 返回号池保存目录（默认 <exe目录>/data/ide_accounts，IDEAUTH_POOL_DIR 可覆盖）。
 //
-// 跟随当前工作目录，与 config.json 同基准，避免配置/号池双基准分家；
+// appdir.Resolve 按 exe 目录解析（启动时 appdir.Chdir() 已对齐 cwd），与 config.json 同基准，避免配置/号池双基准分家；
 // 需要把号池钉死在某个位置时通过 IDEAUTH_POOL_DIR 显式指定。
 func PoolDir() string {
 	if v := os.Getenv("IDEAUTH_POOL_DIR"); v != "" {

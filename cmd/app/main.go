@@ -12,10 +12,11 @@
 // 顺序不能错」。两个进程共用同一个 exe 文件，也不会出现版本不一致。
 // T05 只是把「打开默认浏览器」换成「打开 WebView 窗口」，其余启动流程原样复用。
 //
-// 路径约定（BugFix）：config.json 与 data/ 下的 pid、日志一律按进程**当前工作目录**
-// 解析（即 ./config.json），由启动它的 shell / Docker WORKDIR 决定，不再以 exe 所在
-// 目录为基准。显式 -config 仍优先（Docker 传 /app/config.json）。号池/签到等
-// appdir.Resolve 数据目录保持原行为，不在本入口改动。
+// 路径约定（BugFix）：进程启动时统一 appdir.Chdir() 到 exe 所在目录，之后
+// config.json（./config.json）、data/ 下的 pid/log 与号池（appdir.Resolve）
+// 全部按 exe 目录解析，配置与数据同基准、不分家。这样从 start-panel.bat
+// （先 cd /d 项目根）或快捷方式（工作目录可能是 System32）启动，也不会读错
+// 别处的 config.json。显式 -config 绝对路径仍优先（Docker 传 /app/config.json）。
 //
 // 额外参数：
 //
@@ -42,6 +43,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/linguo2625469/workbuddy2api-panel/internal/appdir"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/appserver"
 )
 
@@ -51,7 +53,8 @@ const (
 	mbIconError    = 0x10
 	mbIconInfo     = 0x40
 	appTitle       = "WorkBuddy2API"
-	// configFile 是配置文件路径：始终相对进程当前工作目录（./config.json）。
+	// configFile 是配置文件路径：始终写成相对路径 ./config.json。
+	// 启动时 cwd 已被 Chdir 到 exe 目录，故实际读取的是 exe 旁的那一份；
 	// 启动器、服务本体、--stop 共用这一个值，避免各自按 exe 目录另算一遍。
 	// 显式 -config（如 Docker 的 /app/config.json）仍由 appserver.Run 的 flag 优先处理。
 	configFile = "config.json"
@@ -125,12 +128,16 @@ func runHidden(name string, args ...string) string {
 func main() {
 	args := os.Args[1:]
 
+	// 一次性把 cwd 锚定到 exe 目录，覆盖 --server / --stop / 默认启动全部分支。
+	// 之后所有相对路径（config.json、data/...、号池）都统一落在 exe 旁。
+	_ = appdir.Chdir()
+
 	// 服务本体：去掉 --server 后交给 appserver.Run（它自己解析 -config）。
 	for i, a := range args {
 		if a == "--server" {
 			os.Args = append([]string{os.Args[0]}, append(args[:i:i], args[i+1:]...)...)
-			// 配置由 appserver.Run 的 -config 默认值按当前工作目录解析（./config.json）。
-			// 不再 Chdir 到 exe 目录：显式 -config 绝对路径优先，其余一律用 ./。
+			// Chdir 已在入口完成：默认 -config 相对 exe 目录解析；
+			// 显式 -config 绝对路径原样交给 appserver.Run，不受 cwd 影响。
 			appserver.Run()
 			return
 		}
@@ -148,8 +155,8 @@ func main() {
 
 // launch 启动器流程：准备目录与配置 → 端口检查 → 拉起服务 → 开 WebView 面板。
 //
-// 所有路径都相对当前工作目录；启动器与它拉起的服务进程必须共享同一个工作目录，
-// 否则会出现「面板改了 ./config.json、服务却读 exe 目录另一份配置」的错配。
+// 入口已 Chdir 到 exe 目录，下列 auths/data/config.json 相对路径全部落在
+// exe 旁；启动器与它拉起的服务进程共享同一个 cwd，不会配置/数据分家。
 func launch() {
 	// 首次运行：补目录 + 生成「只手动、不自动」的默认配置。
 	_ = os.MkdirAll("auths", 0o755)
@@ -169,7 +176,8 @@ func launch() {
 			messageBox("无法定位自身路径："+err.Error(), mbIconError)
 			return
 		}
-		// 不设 cmd.Dir：子进程继承当前工作目录，才会读到同一份 ./config.json。
+		// 不设 cmd.Dir：父进程已 Chdir 到 exe 目录，子进程继承该 cwd，
+		// 与启动器读同一份 ./config.json、写同一份 data/。
 		cmd := exec.Command(self, "--server", "-config", configFile)
 		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
 		if logFile, openErr := os.OpenFile(filepath.Join("data", "server.log"),
@@ -195,7 +203,7 @@ func launch() {
 	}
 
 	if !portReady(addr) {
-		messageBox("服务启动超时，端口 "+addr+" 仍未就绪。\n\n请查看当前目录 data\\server.log 排查。", mbIconError)
+		messageBox("服务启动超时，端口 "+addr+" 仍未就绪。\n\n请查看 exe 同目录 data\\server.log 排查。", mbIconError)
 		return
 	}
 

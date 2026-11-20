@@ -54,8 +54,8 @@ type PoolFile struct {
 	Accounts []*Account `json:"accounts"`
 }
 
-// PoolPath 号池文件路径（默认 <当前工作目录>/data/doubao_accounts.json，DOUBAO_POOL_FILE 可覆盖；
-// 与 config.json 同基准）。
+// PoolPath 号池文件路径（默认 <exe目录>/data/doubao_accounts.json，DOUBAO_POOL_FILE 可覆盖；
+// 启动时 appdir.Chdir() 已对齐 cwd，与 config.json 同基准）。
 func PoolPath() string {
 	if v := strings.TrimSpace(os.Getenv("DOUBAO_POOL_FILE")); v != "" {
 		return v

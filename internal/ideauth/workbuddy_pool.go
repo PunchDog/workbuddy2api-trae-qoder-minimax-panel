@@ -289,11 +289,10 @@ func defaultStr(s, d string) string {
 	return s
 }
 
-// workBuddyAuthsDir 返回主池 auths 目录（默认 <当前工作目录>/auths，可用 IDEAUTH_AUTH_DIR 覆盖）。
+// workBuddyAuthsDir 返回主池 auths 目录（默认 <exe目录>/auths，可用 IDEAUTH_AUTH_DIR 覆盖）。
 //
-// 跟随当前工作目录，与 config.json 同基准，避免配置/号池双基准分家；
-// 从快捷方式启动时请固定「起始位置」为固定可写目录，
-// 需要把号池钉死在某个位置时可直接设置 IDEAUTH_AUTH_DIR。
+// 启动时 appdir.Chdir() 已把 cwd 锚定到 exe 目录，与 config.json 同基准，避免配置/号池双基准分家；
+// exe 需放在可写目录，需要把号池钉死在某个位置时可直接设置 IDEAUTH_AUTH_DIR。
 func workBuddyAuthsDir() string {
 	if v := strings.TrimSpace(os.Getenv("IDEAUTH_AUTH_DIR")); v != "" {
 		return v
