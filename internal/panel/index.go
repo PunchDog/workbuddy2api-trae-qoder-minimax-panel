@@ -2,7 +2,6 @@
 //
 // 页面骨架来自 frontend/dist/index.html（Vite 产物，经 frontend.IndexHTML() 读取
 // go:embed 的嵌入文件系统）；样式与脚本由同源 /panel/assets/* 提供（见 assets.go）。
-// 旧的 single-file 前端已冻结在 archive/panel-legacy-v1/，不再参与编译与 embed。
 //
 // 安全头对"面板页面与全部 /panel/api/* 响应"统一生效：CSP 限制脚本只能来自本服务，
 // 禁止被 iframe 嵌套（防点击劫持），禁 MIME 嗅探，并声明不泄露 Referer 出去。

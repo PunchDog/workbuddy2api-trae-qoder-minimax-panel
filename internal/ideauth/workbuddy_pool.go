@@ -267,12 +267,12 @@ func writeWorkBuddyLocalAccountState(s *WorkBuddySnapshot) error {
 	}
 	payload := map[string]any{
 		"primary": map[string]any{
-			"version":    1,
-			"uid":        s.Account.UID,
-			"nickname":   s.Account.Nickname,
-			"type":       defaultStr(s.Account.Type, "personal"),
+			"version":     1,
+			"uid":         s.Account.UID,
+			"nickname":    s.Account.Nickname,
+			"type":        defaultStr(s.Account.Type, "personal"),
 			"editionType": "free",
-			"savedAt":    time.Now().UnixMilli(),
+			"savedAt":     time.Now().UnixMilli(),
 		},
 	}
 	raw, err := json.MarshalIndent(payload, "", "  ")
@@ -289,10 +289,11 @@ func defaultStr(s, d string) string {
 	return s
 }
 
-// workBuddyAuthsDir 返回主池 auths 目录（默认 <exe目录>/auths，可用 IDEAUTH_AUTH_DIR 覆盖）。
+// workBuddyAuthsDir 返回主池 auths 目录（默认 <当前工作目录>/auths，可用 IDEAUTH_AUTH_DIR 覆盖）。
 //
-// 以 exe 目录为基准而非 os.Getwd()：分发给别人后用户可能双击启动，
-// 工作目录不在程序目录，用 cwd 会把账号写到别处（表现为「号池空了」）。
+// 跟随当前工作目录，与 config.json 同基准，避免配置/号池双基准分家；
+// 从快捷方式启动时请固定「起始位置」为固定可写目录，
+// 需要把号池钉死在某个位置时可直接设置 IDEAUTH_AUTH_DIR。
 func workBuddyAuthsDir() string {
 	if v := strings.TrimSpace(os.Getenv("IDEAUTH_AUTH_DIR")); v != "" {
 		return v

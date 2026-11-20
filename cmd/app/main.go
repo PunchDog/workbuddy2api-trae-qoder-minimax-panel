@@ -12,6 +12,11 @@
 // 顺序不能错」。两个进程共用同一个 exe 文件，也不会出现版本不一致。
 // T05 只是把「打开默认浏览器」换成「打开 WebView 窗口」，其余启动流程原样复用。
 //
+// 路径约定（BugFix）：config.json 与 data/ 下的 pid、日志一律按进程**当前工作目录**
+// 解析（即 ./config.json），由启动它的 shell / Docker WORKDIR 决定，不再以 exe 所在
+// 目录为基准。显式 -config 仍优先（Docker 传 /app/config.json）。号池/签到等
+// appdir.Resolve 数据目录保持原行为，不在本入口改动。
+//
 // 额外参数：
 //
 //	--stop    停止正在运行的服务（读 data/server.pid，兜底按端口找 PID）
@@ -37,7 +42,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/linguo2625469/workbuddy2api-panel/internal/appdir"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/appserver"
 )
 
@@ -47,6 +51,10 @@ const (
 	mbIconError    = 0x10
 	mbIconInfo     = 0x40
 	appTitle       = "WorkBuddy2API"
+	// configFile 是配置文件路径：始终相对进程当前工作目录（./config.json）。
+	// 启动器、服务本体、--stop 共用这一个值，避免各自按 exe 目录另算一遍。
+	// 显式 -config（如 Docker 的 /app/config.json）仍由 appserver.Run 的 flag 优先处理。
+	configFile = "config.json"
 )
 
 var (
@@ -121,9 +129,8 @@ func main() {
 	for i, a := range args {
 		if a == "--server" {
 			os.Args = append([]string{os.Args[0]}, append(args[:i:i], args[i+1:]...)...)
-			// 服务内部仍有相对路径写法（./auths、./data/state.json），
-			// 统一把工作目录对到 exe 所在目录，双击启动也不会写错地方。
-			_ = appdir.Chdir()
+			// 配置由 appserver.Run 的 -config 默认值按当前工作目录解析（./config.json）。
+			// 不再 Chdir 到 exe 目录：显式 -config 绝对路径优先，其余一律用 ./。
 			appserver.Run()
 			return
 		}
@@ -140,14 +147,14 @@ func main() {
 }
 
 // launch 启动器流程：准备目录与配置 → 端口检查 → 拉起服务 → 开 WebView 面板。
+//
+// 所有路径都相对当前工作目录；启动器与它拉起的服务进程必须共享同一个工作目录，
+// 否则会出现「面板改了 ./config.json、服务却读 exe 目录另一份配置」的错配。
 func launch() {
-	dir := appdir.Dir()
-	_ = appdir.Chdir()
-
 	// 首次运行：补目录 + 生成「只手动、不自动」的默认配置。
-	_ = os.MkdirAll(filepath.Join(dir, "auths"), 0o755)
-	_ = os.MkdirAll(filepath.Join(dir, "data"), 0o755)
-	cfgPath := filepath.Join(dir, "config.json")
+	_ = os.MkdirAll("auths", 0o755)
+	_ = os.MkdirAll("data", 0o755)
+	cfgPath := configFile
 	if _, err := os.Stat(cfgPath); err != nil {
 		if werr := appserver.WriteDistDefault(cfgPath); werr != nil {
 			messageBox("无法创建配置文件：\n"+werr.Error()+"\n\n请把本程序放到有写入权限的目录（例如桌面或 D 盘新建文件夹）后重试。", mbIconError)
@@ -162,10 +169,10 @@ func launch() {
 			messageBox("无法定位自身路径："+err.Error(), mbIconError)
 			return
 		}
-		cmd := exec.Command(self, "--server", "-config", "config.json")
-		cmd.Dir = dir
+		// 不设 cmd.Dir：子进程继承当前工作目录，才会读到同一份 ./config.json。
+		cmd := exec.Command(self, "--server", "-config", configFile)
 		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
-		if logFile, openErr := os.OpenFile(filepath.Join(dir, "data", "server.log"),
+		if logFile, openErr := os.OpenFile(filepath.Join("data", "server.log"),
 			os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); openErr == nil {
 			cmd.Stdout = logFile
 			cmd.Stderr = logFile
@@ -175,7 +182,7 @@ func launch() {
 			return
 		}
 		// 记下 PID，--stop 时用它精确结束（避免误杀别的进程）。
-		_ = os.WriteFile(filepath.Join(dir, "data", "server.pid"),
+		_ = os.WriteFile(filepath.Join("data", "server.pid"),
 			[]byte(strconv.Itoa(cmd.Process.Pid)), 0o644)
 		_ = cmd.Process.Release()
 
@@ -188,7 +195,7 @@ func launch() {
 	}
 
 	if !portReady(addr) {
-		messageBox("服务启动超时，端口 "+addr+" 仍未就绪。\n\n请查看同目录下 data\\server.log 排查。", mbIconError)
+		messageBox("服务启动超时，端口 "+addr+" 仍未就绪。\n\n请查看当前目录 data\\server.log 排查。", mbIconError)
 		return
 	}
 
@@ -202,8 +209,7 @@ func launch() {
 
 // stopServer 停止服务：优先用 pid 文件，兜底按监听端口反查 PID。
 func stopServer() {
-	dir := appdir.Dir()
-	pidFile := filepath.Join(dir, "data", "server.pid")
+	pidFile := filepath.Join("data", "server.pid")
 
 	killed := false
 	if raw, err := os.ReadFile(pidFile); err == nil {
@@ -214,7 +220,7 @@ func stopServer() {
 	}
 	if !killed {
 		// 兜底：netstat 找到监听该端口的 PID（端口跟配置走，不写死）
-		_, port, _ := net.SplitHostPort(dialAddr(listenAddrFromConfig(filepath.Join(dir, "config.json"))))
+		_, port, _ := net.SplitHostPort(dialAddr(listenAddrFromConfig(configFile)))
 		out := runHidden("netstat", "-ano", "-p", "TCP")
 		for _, line := range strings.Split(out, "\n") {
 			if port == "" || !strings.Contains(line, ":"+port) || !strings.Contains(line, "LISTENING") {

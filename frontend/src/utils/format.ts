@@ -1,9 +1,9 @@
 /*
- * format.ts —— 现役 app.js 纯格式化函数的 TypeScript 移植。
+ * format.ts —— 旧 app.js 纯格式化函数的 TypeScript 移植。
  *
- * 逐字对齐 archive/panel-legacy-v1/app.js，行为由 frontend/tests/format.test.ts
- * 对照 Go 侧 frontend_test.go 的 caTime / credit / requestLog 断言锁定。
- * 所有函数无副作用、可注入 Date，便于稳定单测。
+ * 行为由 frontend/tests/format.test.ts 对照旧版 caTime / credit / requestLog
+ * 断言锁定。旧前端 archive/panel-legacy-v1/ 及 Go 侧 legacy 测试已在 QA
+ * 验收通过后经用户拍板删除。所有函数无副作用、可注入 Date，便于稳定单测。
  */
 
 /** HTML 转义，与现役 esc() 一致。 */

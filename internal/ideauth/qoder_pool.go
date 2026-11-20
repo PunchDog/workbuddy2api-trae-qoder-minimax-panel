@@ -18,10 +18,10 @@ type QoderPoolFile struct {
 	Accounts []*QoderSnapshot `json:"accounts"`
 }
 
-// PoolDir 返回号池保存目录（默认 <exe目录>/data/ide_accounts）。
+// PoolDir 返回号池保存目录（默认 <当前工作目录>/data/ide_accounts，IDEAUTH_POOL_DIR 可覆盖）。
 //
-// 必须锚定 exe 目录：分发后用户可能从任意工作目录启动，
-// 用 cwd 会让号池文件散落在各处，表现为「刚才存的号不见了」。
+// 跟随当前工作目录，与 config.json 同基准，避免配置/号池双基准分家；
+// 需要把号池钉死在某个位置时通过 IDEAUTH_POOL_DIR 显式指定。
 func PoolDir() string {
 	if v := os.Getenv("IDEAUTH_POOL_DIR"); v != "" {
 		return v

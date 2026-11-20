@@ -76,3 +76,4 @@ frontend/dist/*
 /bin/
 /dist/
 *.exe
+deliverables/

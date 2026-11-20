@@ -1,5 +1,7 @@
 # QA 验收报告｜WorkBuddy2API Panel 前端重构（Wails v3 · Vue3 · tdesign · ECharts）
 
+> **终态更新（2026-11-20）**：本报告为历史验收记录，原文描述的 `archive/panel-legacy-v1/{index.html,app.js}` 归档及 6 个 `legacyV1Asset()` 只读引用测试，已在三轮验收通过（121 前端测试 + CONTRACT_MAP 25 项对照）后经用户拍板一致性全删；文中对该归档的引用保留为当时的验收过程事实，当前仓库已不含这些文件。
+
 | 项 | 内容 |
 | --- | --- |
 | 验收人 | 严过关（Yan）· QA 工程师 |
