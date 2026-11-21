@@ -382,8 +382,8 @@ CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o credit ./cmd/credit
 ### 验证
 
 ```bash
-# 模型列表
-curl -s http://localhost:7863/v1/models -H "Authorization: Bearer your-api-key"
+# 模型列表（发现端点，无需 api-key）
+curl -s http://localhost:7863/v1/models
 
 # 账号状态（汇总 + 每账号详情，disabled 账号透出 disabled_reason）
 curl -s http://localhost:7863/status -H "Authorization: Bearer your-api-key"
@@ -848,11 +848,12 @@ http://127.0.0.1:7863/panel/
 |---|---|---|
 | `POST /v1/chat/completions` | Bearer（`api_key` 非空时） | OpenAI 兼容补全；流式/非流式；请求体上限 8 MiB |
 | `POST /v1/responses` | Bearer（`api_key` 非空时） | **OpenAI Responses API**（Codex CLI / 官方 SDK `responses.create` 走这个端点，不是 chat/completions）。协议适配层：请求体翻译成 chat 形态后交回同一条选号/粘性/熔断/错误分类管线，响应再翻译回 Responses 形态（`output[]` 物品数组 / 具名 SSE 事件）。支持 `input`（字符串或 item 数组）、`instructions`、`tools`、`reasoning.effort`、`max_output_tokens`、`conversation`、`previous_response_id`（进程内短期续接，多轮）。流式产出 `response.created` / `response.output_text.delta` / `response.function_call_arguments.delta` / `response.completed` 等具名事件 |
-| `GET /v1/models` | Bearer（`api_key` 非空时） | 模型列表（纯动态拉取，缓存 10min；失败返回空列表 + 5min 负缓存）；每模型带 `context_length`/`max_output_tokens`（四级查找链：上游目录 → 内置知识表 → model.json 缓存 → models.dev）、`reasoning_supported_efforts`/`reasoning_default_effort` 思考档位及描述/标签/倍率等全字段（上游有返回时） |
+| `GET /v1/models` | 无（发现端点，匿名可读） | 模型列表（纯动态拉取，缓存 10min；失败返回空列表 + 5min 负缓存）；每模型带 `context_length`/`max_output_tokens`（四级查找链：上游目录 → 内置知识表 → model.json 缓存 → models.dev）、`reasoning_supported_efforts`/`reasoning_default_effort` 思考档位及描述/标签/倍率等全字段（上游有返回时） |
 | `GET /status` | Bearer（`api_key` 非空时） | 账号状态汇总 + 每账号详情（积分/冷却/熔断/在途/粘性）+ `model_locks`（按「域 + 模型」聚合的限流视图：可选 / 总数、锁定账号数、`state`、最早解锁与全池解锁时间、限流原因；无锁定为空） |
 | `GET /healthz` | 无 | 健康检查：有 healthy 且未占满账号返回 200，否则 503；响应带身份标识（见下） |
 
-> 鉴权规则：仅当 `api_key` 非空才校验 `Authorization: Bearer <api_key>`；**`api_key` 为空时上述端点直接放行**；`/healthz` 恒无鉴权。
+> 鉴权规则：`api_key` 非空时仅**调用类端点**（chat/completions、responses、status）校验 `Authorization: Bearer <api_key>`；
+> `GET /v1/models`（发现端点，便于客户端先列模型再带 key 调用）与 `/healthz` 恒无鉴权；`api_key` 为空时其余端点直接放行。
 
 `/healthz` 响应示例（200 / 503 同结构，仅状态码与计数变化）：
 

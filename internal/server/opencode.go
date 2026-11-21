@@ -34,6 +34,9 @@ const (
 	// openCodePathPrefix 本网关暴露的转发前缀；SDK 在该前缀后拼 /chat/completions、/models。
 	// 例：http://127.0.0.1:7863/opencode/v1/chat/completions
 	openCodePathPrefix = "/opencode/v1"
+	// openCodeModelPrefix v1 路由协议前缀：/v1/chat/completions 的 model 带此前缀时
+	// 转交 opencode 通道；剥掉后的裸串即上游原始模型 ID（面板列表 raw_id 同口径）。
+	openCodeModelPrefix = "opencode:"
 	// openCodeMaxBody 入站请求体上限（64 MiB），防异常大包打爆内存。
 	openCodeMaxBody = 64 << 20
 	// openCodeDefaultHeaderTimeout 等上游响应头的缺省上限（SSE 长流不适用整体超时）。
@@ -80,6 +83,34 @@ func (h *Handler) opencodeHTTPClient() *http.Client {
 		h.opencodeClientInst = &http.Client{Transport: tr}
 	})
 	return h.opencodeClientInst
+}
+
+// routeOpenCodeModel 接管 /v1/chat/completions 里 model 带 opencode: 前缀的请求。
+// 剥掉前缀得到上游原始模型 ID（面板 /panel/api/models 的 raw_id 同口径），
+// 改写后的 body 由 opencodeProxy 转发；上游 Key 沿用其「配置 opencode.api_key >
+// 调用方 Authorization > env 兜底」优先级，不把网关 Key 误发给第三方。
+// 通道关闭 / 非该前缀 / 非法 JSON / 空裸名一律交回主链路原有口径。
+func (h *Handler) routeOpenCodeModel(body []byte) ([]byte, bool) {
+	// 通道关闭时不接管，让主链路按既有「模型不可用」口径报错。
+	if !h.cfg.OpenCode.Enabled {
+		return body, false
+	}
+	var obj map[string]any
+	if json.Unmarshal(body, &obj) != nil {
+		return body, false
+	}
+	model, _ := obj["model"].(string)
+	if !strings.HasPrefix(model, openCodeModelPrefix) {
+		return body, false
+	}
+	raw := strings.TrimSpace(strings.TrimPrefix(model, openCodeModelPrefix))
+	if raw == "" {
+		return body, false
+	}
+	obj["model"] = raw
+	// obj 来自 JSON 解析，所有值均可序列化，Marshal 不会失败。
+	out, _ := json.Marshal(obj)
+	return out, true
 }
 
 // opencodeProxy 处理 /opencode/v1/*：重写路径后转发到 opencode-go，并注入会话头。

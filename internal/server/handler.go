@@ -2,6 +2,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -195,7 +196,9 @@ func NewHandler(cfg Config) *Handler {
 	h.mux.HandleFunc("POST /v1/chat/completions", h.withAuth(h.chatCompletions))
 	// Responses API 适配端点（见 responses.go）：协议翻译层，内部复用 chatCompletions。
 	h.mux.HandleFunc("POST /v1/responses", h.withAuth(h.responses))
-	h.mux.HandleFunc("GET /v1/models", h.withAuth(h.models))
+	// 模型列表是发现端点：即使配了 api_key 也允许匿名读取，客户端先列模型再带 key 调用。
+	// 实际消费端点（chat/completions、responses）仍由 withAuth 保护。
+	h.mux.HandleFunc("GET /v1/models", h.models)
 	h.mux.HandleFunc("GET /status", h.withAuth(h.status))
 	h.mux.HandleFunc("GET /healthz", h.healthz)
 	// opencode-go 透明转发通道：独立前缀，与 /v1/* 号池路由互不影响。
@@ -593,6 +596,15 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid_request", "read body: "+err.Error())
+		return
+	}
+	// opencode: 前缀路由必须在 newChatStat 之前：否则 WorkBuddy 空统计与
+	// opencode 真实统计各落一行流水，reqlog 事件也会被两份 stat 抢占。
+	// 入口 withAuth 已校验网关 Key；改写路径后复用同一条转发/记账链路。
+	if routed, ok := h.routeOpenCodeModel(body); ok {
+		r.Body = io.NopCloser(bytes.NewReader(routed))
+		r.URL.Path = openCodePathPrefix + "/chat/completions"
+		h.opencodeProxy(w, r)
 		return
 	}
 	// 入口派生计时起点：下面 peek/tools/model/会话键/轮级键/图片判定都要全量解析

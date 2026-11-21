@@ -1086,6 +1086,58 @@ func TestAPIKeyAuth(t *testing.T) {
 	}
 }
 
+// TestModelsEndpointAllowsAnonymous 模型列表是发现端点：配了 api_key 也允许匿名/错 key 读取。
+// 反向守卫同一 handler 下 chat/status 仍须鉴权，防止放行被误扩到调用路径。
+func TestModelsEndpointAllowsAnonymous(t *testing.T) {
+	resetDynamicModelsCache()
+	up := newFakeUpstream(t, func(string) (int, string, bool) {
+		return 200, `{"code":0,"data":{"models":[
+			{"id":"glm-5.2","maxInputTokens":131072,"maxOutputTokens":8192}
+		],"agents":[{"name":"cli","models":["glm-5.2"]}]}}`, false
+	})
+	h := NewHandler(Config{
+		Pool:     testPoolWith(&auth.Auth{UID: "u1", AccessToken: "at", ExpiresAt: 9999999999}),
+		Upstream: up,
+		APIKey:   "secret",
+	})
+	for _, tc := range []struct{ name, authz string }{
+		{"无 Authorization", ""},
+		{"错误 Bearer", "Bearer wrong"},
+	} {
+		req := httptest.NewRequest("GET", "/v1/models", nil)
+		if tc.authz != "" {
+			req.Header.Set("Authorization", tc.authz)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s: code=%d body=%s", tc.name, rec.Code, rec.Body.String())
+		}
+		var resp struct {
+			Object string `json:"object"`
+			Data   []any  `json:"data"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("%s: decode: %v", tc.name, err)
+		}
+		if resp.Object != "list" || len(resp.Data) == 0 {
+			t.Errorf("%s: object=%q count=%d（匿名必须拿到完整列表）", tc.name, resp.Object, len(resp.Data))
+		}
+	}
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("chat 无 key: code=%d want 401", rec.Code)
+	}
+	req = httptest.NewRequest("GET", "/status", nil)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status 无 key: code=%d want 401", rec.Code)
+	}
+}
+
 func TestStatusEndpoint(t *testing.T) {
 	p := testPoolWith(&auth.Auth{UID: "u1", Nickname: "nick", AccessToken: "at", ExpiresAt: 9999999999})
 	p.SetCredits("u1", 42, 0)
