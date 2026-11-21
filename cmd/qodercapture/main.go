@@ -1,10 +1,10 @@
 // qodercapture — 在 Windows 宿主机把 Qoder 客户端登录态收进号池。
 //
-// 为什么需要它：面板部署在 Linux 容器（docker compose）时，客户端登录态
-// （auth.v1.dat，Windows DPAPI + AES-256-GCM 加密）在容器里解不开 —— DPAPI
+// 为什么需要它：面板部署在 Linux 时，客户端登录态
+// （auth.v1.dat，Windows DPAPI + AES-256-GCM 加密）在 Linux 上解不开 —— DPAPI
 // 是 Windows 专有机制，Linux 无法模拟。而号池 data/ide_accounts/qoder_accounts.json
-// 存的是**明文快照**且已挂载共享：在 Windows 上跑本工具收录一次，容器里的
-// 面板就能直接签到/续期/查额度，不必再碰客户端文件。
+// 存的是**明文快照**且已共享：在 Windows 上跑本工具收录一次，Linux 侧的面板
+// 就能直接签到/续期/查额度，不必再碰客户端文件。
 //
 // 用法（仓库根目录，双击 qoder-capture.bat 或命令行）：
 //
@@ -13,7 +13,7 @@
 //	qodercapture -realm intl  只收国际版客户端（com.qoder.app.stable）
 //
 // 前提：对应版本的 Qoder 客户端已在本机登录。号池落在 exe 同级
-// data/ide_accounts/（与 docker-compose 挂载的 ./data 是同一份）。
+// data/ide_accounts/（与面板服务读取的 ./data 是同一份）。
 package main
 
 import (

@@ -135,7 +135,7 @@ func Run() {
 		// errors.Is 才能看穿 Load 里 fmt.Errorf("%w") 的包装；os.IsNotExist 不行。
 		if errors.Is(err, fs.ErrNotExist) {
 			// 首次运行：目录下没有配置 → 自动落一份推荐配置（含随机 api_key）再加载。
-			// 双击 exe / 裸跑 docker 即开，无需先手工复制样例。
+			// 双击 exe 即开，无需先手工复制样例。
 			if key, werr := WriteDefault(*cfgPath); werr == nil {
 				log.Printf("config %s 不存在，已生成推荐配置（api_key=%s，记录在该文件里，可自行修改）", *cfgPath, key)
 				cfg, err = Load(*cfgPath)
@@ -267,7 +267,7 @@ func Run() {
 	up.BillingBaseGlobal = cfg.Global.BillingBase
 	auth.SetGlobalEnabled(cfg.Global.Enabled)
 	// model.json 本地缓存接线（context_length/max_output_tokens 四级查找链第 3 级）：
-	// 数据目录与 state.json 同风格（Docker volume 持久化路径）。首次缺失/损坏自动
+	// 数据目录与 state.json 同风格（随数据目录持久化）。首次缺失/损坏自动
 	// 回落仓库内嵌种子；models.dev 按需拉取成功后原子写回。
 	upstream.SetModelCatalogPath(stateSibling(cfg.StateFile, "model.json"))
 
@@ -376,6 +376,8 @@ func Run() {
 		StickyCount: sessCount,
 		Version:     appVersion,
 		Live:        live,
+		// 面板页面门禁：桌面启动器带 token 打开 WebView；浏览器无 token 403。
+		AccessToken: cfg.Panel.AccessToken,
 		// 模型上限探测数据（scripts/probe_max_tokens.py --panel-out 写入）：
 		// 与 state 文件同目录，缺省 data/output_probes.json。
 		ProbeFile:  stateSibling(cfg.StateFile, "output_probes.json"),
@@ -647,7 +649,7 @@ func saveConfig(raw []byte, path string, live *livecfg.Holder, p *pool.Pool, up 
 		merged["api_key"] = key
 	}
 
-	// 3) 落盘（原子替换；Docker 单文件 bind mount 的 EBUSY 回退在 writeConfigAtomic 内）。
+	// 3) 落盘（原子替换；单文件挂载的 EBUSY 回退在 writeConfigAtomic 内）。
 	out, err := json.MarshalIndent(merged, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("marshal config: %w", err)

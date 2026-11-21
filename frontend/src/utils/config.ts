@@ -53,8 +53,12 @@ export const CFG_MAP: Record<string, string[]> = {
   opencode_api_key: ['opencode', 'api_key'],
 }
 
-/** 覆盖型文本字段：空串本身有意义（回落内置默认），必须照发。 */
-export const CLEARABLE_CFG = new Set(['user_agent', 'prompt_file', 'opencode_api_key'])
+/**
+ * 覆盖型文本字段：空串本身有意义（回落内置默认），必须照发。
+ */
+export const CLEARABLE_CFG = new Set([
+  'user_agent', 'prompt_file', 'opencode_api_key',
+])
 
 /** Go time.ParseDuration 同口径的即时校验。 */
 export const DURATION_RE = /^(\d+(\.\d+)?(ns|us|µs|ms|s|m|h))+$/
@@ -130,6 +134,10 @@ export function fillConfig(config: unknown): ConfigFields {
 }
 
 export function durationBad(name: string, fields: ConfigFields): boolean {
+  // 只有时长字段才按 Go 时长语法校验。此前缺这道守卫，任何非空文本
+  // （如 :7863、9, 21、sk-sp-…）都被拿去匹配 DURATION_RE 而失败，
+  // 导致配置页每个字段都误标红色「格式错误」，整页看起来坏掉。
+  if (!DURATION_FIELDS.includes(name)) return false
   const el = fields[name]
   if (!el) return false
   const v = el.value.trim()

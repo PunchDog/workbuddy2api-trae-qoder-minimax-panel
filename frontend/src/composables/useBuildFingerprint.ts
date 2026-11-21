@@ -9,13 +9,15 @@
  * 而本页仍跑旧 JS → 置 mismatch 让 App.vue 弹 BuildMismatchDialog。不自动 reload，
  * 避免打断用户正在进行的签到/切号操作（与现役口径一致）。
  *
+ * 失配判定只看 ETag：本页 JS 加载后服务端 index.html 的 ETag 才变，才说明二进制已更新
+ * 而本页仍是旧 JS。绝不比对 localStorage 里的旧 script src —— 重新 build 后首次打开
+ * 新包时哈希必然变化，那种比对会把正常升级误判为失配（Wails 包首开弹窗即此因）。
+ *
  * 健壮性：HEAD /panel/ 是公开静态路由，不经 /panel/api/，不会触发 401 弹窗；
  * 网络抖动/隐私模式一律静默降级，下一轮再查。依赖可注入以便单测不依赖浏览器与真实网络。
  */
 import { ref, type Ref } from 'vue'
 
-/** localStorage 键：保存本页首次加载的 script src（跨标签页构建变化提示）。 */
-export const BUILD_LS_KEY = 'wb2api.build'
 /** 探测间隔：60s，与现役 app.js 一致。 */
 export const BUILD_PROBE_INTERVAL_MS = 60_000
 /** 稳定探测路径：/panel/ 静态路由，公开、带 ETag、不触发鉴权。 */
@@ -77,18 +79,13 @@ export function useBuildFingerprint(deps: ProbeDeps = {}): BuildFingerprintApi {
   let initialEtag = ''
   let timer: unknown = undefined
 
-  /** 读取本页 module script 文件名作为「前端构建」显示值，并保留跨标签页 localStorage 比对。 */
+  /** 读取本页 module script 文件名作为「前端构建」展示值；不参与失配判定（见文件头注释）。 */
   function captureFrontVer(): void {
     try {
       if (typeof document === 'undefined') return
       const script = document.querySelector('script[type="module"][src]') as HTMLScriptElement | null
       const src = String((script && script.getAttribute('src')) || '')
       frontVer.value = src.split('/').pop() || src || '未知'
-      if (src && typeof localStorage !== 'undefined') {
-        const prev = localStorage.getItem(BUILD_LS_KEY)
-        if (prev && prev !== src) mismatch.value = true
-        localStorage.setItem(BUILD_LS_KEY, src)
-      }
     } catch {
       // 隐私模式 / 非浏览器环境跳过，不影响面板主体。
     }

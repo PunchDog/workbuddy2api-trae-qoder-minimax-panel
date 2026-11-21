@@ -46,7 +46,7 @@ func startDesktop(panelURL string, stopGateway func(), title string) error {
 	})
 
 	// 关窗只隐藏到托盘，不结束网关进程。Cancel() 在内置 close listener
-	// 之前执行，阻止窗口被销毁；托盘菜单负责显式退出。
+	// 之前执行，阻止窗口被销毁；托盘「退出」负责结束网关与启动器。
 	window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
 		event.Cancel()
 		window.Hide()
@@ -66,6 +66,10 @@ func startDesktop(panelURL string, stopGateway func(), title string) error {
 	})
 	menu.AddSeparator()
 	menu.Add("退出").OnClick(func(_ *application.Context) {
+		// 只 app.Quit() 会留下 --server 残留：本启动器拉起过网关就连它一起停。
+		if spawnedGateway {
+			stopServerQuiet()
+		}
 		app.Quit()
 	})
 	tray.SetMenu(menu)

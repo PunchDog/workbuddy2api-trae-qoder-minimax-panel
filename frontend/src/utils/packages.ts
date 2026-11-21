@@ -260,6 +260,142 @@ export function sortByExpiry(list: PackAccount[], today: Date): PackAccount[] {
   return keyed.map(({ a }) => a)
 }
 
+/* ---------------------------------------------------------------------------
+ * IDE 平台积分卡（Trae / Qoder）
+ * 旧版 app.js loadPkIdea 的纯逻辑移植：归一为「大号剩余 + 分段构成条 + 图例」。
+ * 与 WorkBuddy 的 PackAccount 卡片并列展示，补回重构时丢失的 Trae/Qoder 积分构成。
+ * ------------------------------------------------------------------------- */
+
+/** 积分构成条的一段（条形宽度 + 图例文字）。 */
+export interface IdeaSegment {
+  label: string
+  remain: number
+  total: number
+  count: number
+  expiryText: string
+  color: string
+}
+
+/** IDE 平台积分卡统一视图模型。 */
+export interface IdeaCreditCard {
+  key: string
+  name: string
+  sub: string
+  platform: 'Trae' | 'Qoder'
+  realmChip?: string
+  remain: number
+  total: number
+  used: number
+  note: string
+  segments: IdeaSegment[]
+  error?: string
+}
+
+const IDE_COLORS = ['#4f8cff', '#25b08b', '#e8a33d', '#c96bd6', '#e2607a', '#20a4a4']
+
+/** 毫秒到期 → 中文短日期；9999 年或缺失视为不过期。 */
+export function ideaExpiryText(ms: number | undefined | null): string {
+  if (!ms || !Number.isFinite(Number(ms)) || Number(ms) <= 0) return '不过期'
+  const d = new Date(Number(ms))
+  if (Number.isNaN(d.getTime()) || d.getFullYear() >= 9999) return '不过期'
+  return d.toLocaleDateString('zh-CN')
+}
+
+/**
+ * Trae 逐包 → 积分卡：同类 desc 合并为一段（如「签到奖励 x29」），剩余降序，
+ * end_time 为秒（上游），转换为毫秒。无逐包明细时 error=提示。
+ */
+export function traeCreditCards(
+  accounts: Array<{ name?: string; packs?: Array<Record<string, unknown>>; has_balance?: boolean; error?: string }>,
+): IdeaCreditCard[] {
+  return (accounts || []).map((a, idx) => {
+    const packs = a.packs || []
+    const key = 'trae:' + String(a.name || idx)
+    if (!packs.length) {
+      return {
+        key, name: a.name || 'Trae 账号', sub: '', platform: 'Trae' as const,
+        remain: 0, total: 0, used: 0, note: '', segments: [],
+        error: a.error || (a.has_balance ? '无逐包明细' : '无法获取（凭证过期或接口异常）'),
+      }
+    }
+    const groups = new Map<string, IdeaSegment>()
+    let remain = 0, total = 0
+    packs.forEach((p) => {
+      const label = String(p.desc || '积分包')
+      const unlimited = Boolean(p.unlimited)
+      const r = unlimited ? 0 : Number(p.remaining || 0)
+      const t = unlimited ? 0 : Number(p.limit || 0)
+      remain += r
+      total += t
+      let g = groups.get(label)
+      if (!g) {
+        g = { label, remain: 0, total: 0, count: 0, expiryText: '不过期', color: '' }
+        groups.set(label, g)
+      }
+      g.count += 1
+      g.remain += r
+      g.total += t
+      const ms = Number(p.end_time || 0) * 1000
+      if (ms > 0) {
+        const text = ideaExpiryText(ms)
+        if (g.expiryText === '不过期' || text < g.expiryText) g.expiryText = text
+      }
+    })
+    const segments = [...groups.values()]
+      .sort((x, y) => y.remain - x.remain)
+      .map((g, i) => ({ ...g, color: IDE_COLORS[i % IDE_COLORS.length] }))
+    const timed = packs.filter((p) => Number(p.end_time || 0) > 0)
+      .sort((x, y) => Number(x.end_time) - Number(y.end_time))
+    const next = timed[0]
+    const gain = packs.find((p) => /签到|checkin|daily/i.test(String(p.desc || '')))
+    const gainText = gain ? '签到奖励：+' + String(gain.limit ?? '不限量') + ' Credits/天' : '签到奖励：见积分包'
+    const expText = next ? '最近到期：' + ideaExpiryText(Number(next.end_time) * 1000) : '到期：不过期'
+    return {
+      key, name: a.name || 'Trae 账号', sub: '共 ' + total + ' · ' + packs.length + ' 个包',
+      platform: 'Trae' as const, remain, total, used: 0, note: gainText + ' · ' + expText, segments,
+    }
+  })
+}
+
+/**
+ * Qoder 逐号额度 → 积分卡：套餐内 + 附加/签到两段，按 cn/intl 标版本角标。
+ * phase!=ok 的账号带 error 展示查询失败，不伪造积分。
+ */
+export function qoderCreditCards(
+  accounts: Array<{ email?: string; name?: string; realm?: string; current?: boolean }>,
+  usages: Array<{ phase?: string; msg?: string; plan_tier_name?: string; plan_tier?: string; user_quota?: Record<string, unknown> | null; add_on_quota?: Record<string, unknown> | null; expires_at_ms?: number } | null>,
+): IdeaCreditCard[] {
+  return (accounts || []).map((a, i) => {
+    const u = usages[i]
+    const realmChip = a.realm === 'cn' ? '国内版' : '国际版'
+    const key = 'qoder:' + String(a.email || i)
+    const base = { key, name: a.name || a.email || 'Qoder 账号', sub: String(a.email || ''), platform: 'Qoder' as const, realmChip }
+    if (!u || u.phase !== 'ok') {
+      return { ...base, remain: 0, total: 0, used: 0, note: '', segments: [], error: (u && String(u.msg)) || '额度查询失败' }
+    }
+    const pkg = (u.user_quota || {}) as Record<string, unknown>
+    const addon = (u.add_on_quota || {}) as Record<string, unknown>
+    const pkgRemain = Number(pkg.remaining || 0), addonRemain = Number(addon.remaining || 0)
+    const pkgUsed = Number(pkg.used || 0), addonUsed = Number(addon.used || 0)
+    const pkgTotal = Number(pkg.total || 0), addonTotal = Number(addon.total || 0)
+    const segments: IdeaSegment[] = [
+      { label: '套餐内', remain: pkgRemain, total: pkgTotal, count: 1, expiryText: '', color: IDE_COLORS[0] },
+      { label: '附加/签到', remain: addonRemain, total: addonTotal, count: 1, expiryText: '', color: IDE_COLORS[1] },
+    ]
+    const tier = String(u.plan_tier_name || u.plan_tier || '—')
+    const expText = '到期：' + ideaExpiryText(u.expires_at_ms)
+    return {
+      ...base,
+      remain: pkgRemain + addonRemain,
+      total: pkgTotal + addonTotal,
+      used: pkgUsed + addonUsed,
+      note: '签到奖励：+100 Credits/日 · ' + expText,
+      segments,
+      sub: base.sub + ' · ' + tier + (a.current ? ' · 当前' : ''),
+    }
+  })
+}
+
 /** 快照到期排序：用 overview 的 credits_earliest_expiry，无信息者排最后。 */
 export function sortByExpirySnapshot(list: PackAccount[]): PackAccount[] {
   const keyed = list.map((a) => {

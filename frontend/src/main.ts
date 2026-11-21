@@ -33,6 +33,11 @@ import {
   Alert,
 } from 'tdesign-vue-next'
 
+// TDesign 全局主题变量（:root 的 --td-*）：按需引入组件 CSS 不会自动带入。
+// 缺失时 Tabs 的 .t-tabs__nav-wrap 靠 font-size:0 + --td-font-body-medium
+// 恢复标签字号，变量为空会把标签宽高压成 0（实测 0×0，只剩首个 tab 内容可见）。
+import 'tdesign-vue-next/es/style/index.css'
+
 // 只加载实际使用的组件样式，避免整包 CSS 进入产物。
 import 'tdesign-vue-next/es/button/style/index.css'
 import 'tdesign-vue-next/es/dialog/style/index.css'
@@ -54,6 +59,11 @@ import 'tdesign-vue-next/es/divider/style/index.css'
 import 'tdesign-vue-next/es/alert/style/index.css'
 
 import '@/styles/app.css'
+// vue-echarts 的 CSP 构建（vue-echarts/csp，为严格 script-src 避免 new Function）
+// 刻意不含样式：它依赖 style.css 给自定义元素 x-vue-echarts 设 display:block /
+// width:100% / height:100%。漏引时该元素按 inline 渲染、高度为 0，canvas 被
+// 压成 0 高度 → 用量页三图全空白（2026-11-20 QA 实测根因）。必须全局引入。
+import 'vue-echarts/csp/style.css'
 import App from './App.vue'
 
 const app = createApp(App)

@@ -6,7 +6,9 @@
  * 保证 Table/Dialog/Form/Select 与冷石墨仪表盘一致。
  */
 
-:root {
+/* :root:root 提升特异性：TDesign 主题文件（es/style/index.css）也声明 :root 的
+ * --td-* 变量，打包顺序不保证在后，这里必须稳压它，否则品牌色退回默认蓝。 */
+:root:root {
   color-scheme: dark;
 
   --bg: #0c0e14;
@@ -41,7 +43,8 @@
   --td-text-color-placeholder: var(--ink-3);
 }
 
-[data-theme='light'] {
+/* 与 :root:root 同特异性（亮色块在后，故亮色变量胜出）。 */
+:root[data-theme='light'] {
   color-scheme: light;
 
   --bg: #f4f5f8;

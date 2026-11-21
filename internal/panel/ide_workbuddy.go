@@ -11,9 +11,13 @@ import (
 )
 
 // wbEdition 解析 edition 参数。
+//
+// "global" 是前端下拉的实际取值（旧版 app.js 遗留命名），必须与 "intl" 等价：
+// 曾漏掉该别名，导致用户选「国际版」时这里回落 CN，扫码页永远打开
+// www.workbuddy.cn（国内版），登录出来的账号也被写成 cn。
 func wbEdition(s string) ideauth.WorkBuddyEdition {
-	switch s {
-	case "intl":
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "intl", "global":
 		return ideauth.WorkBuddyIntl
 	case "intlbuddy":
 		return ideauth.WorkBuddyIntlBuddy
@@ -26,6 +30,7 @@ func wbEdition(s string) ideauth.WorkBuddyEdition {
 // 列表前先做一次「主池 → 号池」静默同步，保证客户端已登录的账号必然出现在列表里。
 func (p *Panel) workbuddyAccounts(w http.ResponseWriter, r *http.Request) {
 	_, _, _ = ideauth.SyncWorkBuddyFromPool()
+	p.syncIDEWorkBuddyToMainPool(false)
 	list, err := ideauth.ListWorkBuddyAccounts()
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
@@ -92,6 +97,8 @@ func (p *Panel) workbuddyPoll(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
+	// 登录成功立即投影进主池：否则签到池 / 签到 / 网关选号都看不到这个号。
+	p.syncIDEWorkBuddyToMainPool(true)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "pending": false, "added": added, "account": saved})
 }
 
@@ -107,6 +114,8 @@ func (p *Panel) workbuddyAdd(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
+	// 同上：阻塞式添加也要立刻投影，保证「添加成功」与「面板可见」一致。
+	p.syncIDEWorkBuddyToMainPool(true)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "added": added, "account": snap})
 }
 

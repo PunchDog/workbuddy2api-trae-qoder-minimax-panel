@@ -77,3 +77,4 @@ frontend/dist/*
 /dist/
 *.exe
 deliverables/
+frontend/tmp-ui.png

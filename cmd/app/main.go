@@ -16,7 +16,7 @@
 // config.json（./config.json）、data/ 下的 pid/log 与号池（appdir.Resolve）
 // 全部按 exe 目录解析，配置与数据同基准、不分家。这样从 start-panel.bat
 // （先 cd /d 项目根）或快捷方式（工作目录可能是 System32）启动，也不会读错
-// 别处的 config.json。显式 -config 绝对路径仍优先（Docker 传 /app/config.json）。
+// 别处的 config.json。显式 -config 绝对路径仍优先。
 //
 // 额外参数：
 //
@@ -27,13 +27,14 @@
 //
 //	go build -trimpath -ldflags "-s -w -H=windowsgui" -o WorkBuddy2API.exe ./cmd/app
 //
-// 桌面壳实现在 desktop.go（windows && !server），-tags server 时退化为浏览器。
+// 桌面壳实现在 desktop.go（windows && !server）；-tags server 时退化为错误提示。
 package main
 
 import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -94,6 +95,25 @@ func listenAddrFromConfig(cfgPath string) string {
 		}
 	}
 	return defaultAddr
+}
+
+// panelTokenFromConfig 从 config.json 读 panel.access_token；缺省/空回落默认令牌。
+// 与 listenAddrFromConfig 同口径：启动器必须跟配置走，否则改过令牌后 WebView 打不开面板。
+func panelTokenFromConfig(cfgPath string) string {
+	raw, err := os.ReadFile(cfgPath)
+	if err == nil {
+		var c struct {
+			Panel struct {
+				AccessToken string `json:"access_token"`
+			} `json:"panel"`
+		}
+		if json.Unmarshal(raw, &c) == nil {
+			if v := strings.TrimSpace(c.Panel.AccessToken); v != "" {
+				return v
+			}
+		}
+	}
+	return appserver.DefaultPanelAccessToken
 }
 
 // dialAddr 把监听地址转成用于探测/打开面板的地址（0.0.0.0 换成回环）。
@@ -176,6 +196,9 @@ func launch() {
 			messageBox("无法定位自身路径："+err.Error(), mbIconError)
 			return
 		}
+		// kill-on-close Job：启动器无论正常退出、崩溃还是被强杀，内核都会
+		// 回收加入该 Job 的 --server 子进程，避免任务管理器残留。
+		setupKillOnCloseJob()
 		// 不设 cmd.Dir：父进程已 Chdir 到 exe 目录，子进程继承该 cwd，
 		// 与启动器读同一份 ./config.json、写同一份 data/。
 		cmd := exec.Command(self, "--server", "-config", configFile)
@@ -192,6 +215,9 @@ func launch() {
 		// 记下 PID，--stop 时用它精确结束（避免误杀别的进程）。
 		_ = os.WriteFile(filepath.Join("data", "server.pid"),
 			[]byte(strconv.Itoa(cmd.Process.Pid)), 0o644)
+		// 本启动器亲手拉起了网关：托盘「退出」时连它一起收掉。
+		spawnedGateway = true
+		assignToKillJob(cmd.Process)
 		_ = cmd.Process.Release()
 
 		for i := 0; i < 120; i++ { // 最多等 30 秒（冷启动要初始化供应商）
@@ -209,14 +235,29 @@ func launch() {
 
 	// T05：默认模式打开 Wails WebView 窗口；窗口只提供原生外壳，
 	// 面板与 API 全部由隐藏网关在同源 http://<addr>/panel/ 提供。
-	panelURL := "http://" + addr + "/panel/"
+	// 面板门禁：URL 携带 token；浏览器没有配置里的令牌（也无 Cookie）直接 403。
+	panelURL := "http://" + addr + "/panel/?token=" + url.QueryEscape(panelTokenFromConfig(configFile))
 	if err := startDesktop(panelURL, stopServer, appTitle); err != nil {
-		messageBox("桌面面板启动失败：\n"+err.Error()+"\n\n可改用浏览器访问 "+panelURL, mbIconError)
+		messageBox("桌面面板启动失败：\n"+err.Error(), mbIconError)
 	}
 }
 
-// stopServer 停止服务：优先用 pid 文件，兜底按监听端口反查 PID。
+// spawnedGateway 标记本次启动器是否亲手拉起了 --server。
+// 托盘「退出」只在 true 时连带停止网关，避免误杀用户手动启动的服务。
+var spawnedGateway bool
+
+// stopServer 停止服务并弹窗反馈（--stop 与托盘「停止网关」使用）。
 func stopServer() {
+	if stopServerQuiet() {
+		messageBox("已停止服务。\n\n下次需要时再双击本程序即可。", mbIconInfo)
+	} else {
+		messageBox("没有找到正在运行的服务（可能已经停止）。", mbIconInfo)
+	}
+}
+
+// stopServerQuiet 执行停止动作但不弹窗，返回是否命中并结束了进程。
+// 托盘「退出」先用它收掉本启动器拉起的网关，避免启动器退出后 --server 残留。
+func stopServerQuiet() bool {
 	pidFile := filepath.Join("data", "server.pid")
 
 	killed := false
@@ -246,11 +287,7 @@ func stopServer() {
 		}
 	}
 	_ = os.Remove(pidFile)
-	if killed {
-		messageBox("已停止服务。\n\n下次需要时再双击本程序即可。", mbIconInfo)
-	} else {
-		messageBox("没有找到正在运行的服务（可能已经停止）。", mbIconInfo)
-	}
+	return killed
 }
 
 // 保留 fmt 引用：调试时可临时改成 fmt.Println，避免误删导入。

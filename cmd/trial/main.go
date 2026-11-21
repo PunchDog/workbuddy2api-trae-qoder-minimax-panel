@@ -3,12 +3,8 @@
 //
 // 用法：
 //
-//	# 本地：在项目根目录（需 config.json + auths/ + data/）直接 run
+//	# 在项目根目录（需 config.json + auths/ + data/）直接 run
 //	go run ./cmd/trial
-//
-//	# 容器内：先 cp 进去再 exec
-//	docker cp trial workbuddy2api:/tmp/trial
-//	docker exec -w /app workbuddy2api /tmp/trial
 //
 // 结果逐账号输出到 stdout：
 //

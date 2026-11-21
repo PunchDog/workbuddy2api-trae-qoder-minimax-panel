@@ -1,6 +1,6 @@
 @echo off
 rem One-shot build. Outputs:
-rem   ..\wb2api.exe              server (scheduled task / Docker parity)  [CGO_ENABLED=0]
+rem   ..\wb2api.exe              server (scheduled task / headless)       [CGO_ENABLED=0]
 rem   ..\dist\WorkBuddy2API.exe  desktop shell (Wails v3)                [CGO_ENABLED=1]
 rem Keep linker flags identical for both outputs: -trimpath -s -w -H=windowsgui
 rem

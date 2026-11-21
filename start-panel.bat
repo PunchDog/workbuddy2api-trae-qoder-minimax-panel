@@ -13,8 +13,7 @@ if not exist "dist\WorkBuddy2API.exe" (
 echo ============================================
 echo   WorkBuddy2API Desktop Panel
 echo   Launcher starts a hidden gateway, then opens the WebView window.
-echo   Panel is also available in a browser:
-echo     http://127.0.0.1:7863/panel/
+echo   Panel is only available in the Wails window (page gate token required).
 echo   Closing the window hides it to tray; use tray menu to stop gateway or quit.
 echo ============================================
 echo.

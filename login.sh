@@ -8,12 +8,11 @@
 #   1. POST /v2/plugin/auth/state 拿授权 URL（无 PKCE，state 由服务端签发）
 #   2. 你在浏览器打开 URL 完成登录
 #   3. 回到这里按 y → poll 拿 token+uid+nickname → 签到 → 落盘 auths/workbuddy-<uid>.json
-#   4. 重启 workbuddy2api 容器加载新账号
+#   4. 重启服务加载新账号
 set -euo pipefail
 
 cd "$(dirname "$0")"
 AUTH_DIR="./auths"
-CONTAINER="workbuddy2api"
 
 mkdir -p "$AUTH_DIR"
 
@@ -160,16 +159,14 @@ PYEOF
 
 # ─── 重启服务 ────────────────────────────────────────────
 echo ""
-if docker ps --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
-    echo "重启 $CONTAINER 加载新账号..."
-    docker restart "$CONTAINER" >/dev/null
-    sleep 2
-    # API_KEY 从 config.json 读取（该变量在脚本中未定义，fallback 仅为占位，不会通过鉴权）
+if curl -sf -m 2 http://127.0.0.1:7863/healthz >/dev/null 2>&1; then
+    # API_KEY 从 config.json 读取（fallback 仅为占位，不会通过鉴权）
     API_KEY=$(python3 -c "import json; print(json.load(open('config.json')).get('api_key',''))" 2>/dev/null)
     COUNT=$(curl -s http://127.0.0.1:7863/status -H "Authorization: Bearer ${API_KEY:-test_key}" 2>/dev/null | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('accounts',[])))" 2>/dev/null || echo "?")
-    echo "服务已重启，当前账号数: $COUNT"
+    echo "检测到本地服务在运行，当前账号数: $COUNT"
+    echo "请手动重启服务以加载新账号（脚本不再自动重启）。"
 else
-    echo "容器 $CONTAINER 未运行，auth 文件已保存，下次启动自动加载"
+    echo "本地服务未运行，auth 文件已保存，下次启动自动加载"
 fi
 
 echo ""

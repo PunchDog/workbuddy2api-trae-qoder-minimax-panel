@@ -16,11 +16,11 @@
 | `vite.config.ts` | base `/panel/`、dev 9245 + `/panel/api` proxy、`modulePreload.polyfill:false`、echarts `manualChunks` 拆包 |
 | `tsconfig.json` | TS 严格模式、`@/` 路径别名 |
 | `index.html` | Vite 入口，只有 `#app` + 外链 module script，**禁止内联脚本** |
-| `src/main.ts` / `src/App.vue` | 应用入口 + 布局壳（侧栏 208px + 顶栏 + 8 路由出口 + 7 弹窗挂载） |
+| `src/main.ts` / `src/App.vue` | 应用入口 + 布局壳（侧栏 208px + 顶栏 + 7 路由出口 + 7 弹窗挂载） |
 | `src/api/client.ts` | 同源 fetch：Bearer / 401 事件 / GET 在途合并 / multipart / 15s 超时 |
 | `src/api/types.ts` / `src/api/stats.ts` | 手写 TS 契约与三个统计端点封装（T03/T07） |
 | `src/stores/*` / `src/composables/*` | pinia 状态、主题、时间维度、图表令牌订阅 |
-| `src/views/*.vue` | 8 视图：checkin / usage / packages / taskscenter / ideaccounts / models / config / logs |
+| `src/views/*.vue` | 7 导航视图：checkin（含 CheckinPackagesView 合并容器 + CheckinView/PackagesView 两 tab）/ usage / taskscenter / ideaccounts / models / config / logs |
 | `src/dialogs/*.vue` | 7 类弹窗（添加账号 6 tab、积分任务、Qoder 设备/领取、券码、密钥、构建失配） |
 | `src/components/charts/*.vue` | T07 三图：TrendChart / HeatmapChart / BreakdownChart + EChartBase |
 | `src/styles/tokens.css` / `app.css` | 令牌唯一色值源（暗色默认）；布局/卡片/图表样式 |

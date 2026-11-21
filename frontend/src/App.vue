@@ -30,15 +30,15 @@
         </TButton>
       </header>
 
-      <!-- 左侧导航：8 个视图键沿用现役 hash 名 -->
+      <!-- 左侧导航：7 项（签到池+积分构成已合并为同一页的两个 tab） -->
       <nav class="wb-nav" aria-label="主导航">
         <button
           v-for="item in NAV_ITEMS"
           :key="item.key"
           type="button"
           class="wb-nav-item"
-          :class="{ 'is-active': panel.currentView === item.key }"
-          :aria-current="panel.currentView === item.key ? 'page' : undefined"
+          :class="{ 'is-active': isNavActive(item.key) }"
+          :aria-current="isNavActive(item.key) ? 'page' : undefined"
           @click="panel.setView(item.key)"
         >
           <span class="wb-nav-item-glyph" aria-hidden="true">{{ item.glyph }}</span>
@@ -57,7 +57,7 @@
     <!-- 401 触发的访问密钥弹窗：client.ts 广播事件 → session store → 这里 -->
     <ApiKeyDialog v-model:visible="session.keyDialogOpen" />
 
-    <!-- 构建失配提示：本页脚本指纹与 localStorage 里的上次指纹不同则提示刷新 -->
+    <!-- 构建失配提示：服务端 ETag 变化（本页 JS 已旧）时提示刷新 -->
     <BuildMismatchDialog v-model:visible="buildMismatch" :front-ver="frontVer" :back-ver="backVer" />
   </TConfigProvider>
 </template>
@@ -76,10 +76,9 @@ import { TIME_RANGES, type TimeRangeKey } from '@/composables/useTimeRange'
 import { useTheme, type ThemeMode } from '@/composables/useTheme'
 import { useBuildFingerprint } from '@/composables/useBuildFingerprint'
 
-// 8 个真实视图：与现役 hash 名一一对应，默认 #checkin。
-import CheckinView from '@/views/CheckinView.vue'
+// 7 个导航视图 + packages（合并页隐藏别名）：默认 #checkin。
+import CheckinPackagesView from '@/views/CheckinPackagesView.vue'
 import UsageView from '@/views/UsageView.vue'
-import PackagesView from '@/views/PackagesView.vue'
 import TasksCenterView from '@/views/TasksCenterView.vue'
 import IdeAccountsView from '@/views/IdeAccountsView.vue'
 import ModelsView from '@/views/ModelsView.vue'
@@ -88,7 +87,7 @@ import LogsView from '@/views/LogsView.vue'
 import ApiKeyDialog from '@/dialogs/ApiKeyDialog.vue'
 import BuildMismatchDialog from '@/dialogs/BuildMismatchDialog.vue'
 
-/** 布局壳 + hash 路由出口 + 全局浮层；8 视图内容由 T04 接入（架构 §7 T04）。 */
+/** 布局壳 + hash 路由出口 + 全局浮层；checkin / packages 指向同一容器的两个 tab。 */
 const panel = usePanelStore()
 const session = useSessionStore()
 const theme = useTheme()
@@ -97,9 +96,9 @@ const theme = useTheme()
 const globalConfig = {}
 
 const VIEW_COMPONENTS: Record<ViewKey, Component> = {
-  checkin: CheckinView,
+  checkin: CheckinPackagesView,
+  packages: CheckinPackagesView,
   usage: UsageView,
-  packages: PackagesView,
   taskscenter: TasksCenterView,
   ideaccounts: IdeAccountsView,
   models: ModelsView,
@@ -130,6 +129,11 @@ const {
   start: startBuildProbe,
   stop: stopBuildProbe,
 } = useBuildFingerprint()
+
+/** packages 是合并页的隐藏别名，侧栏「签到池」项保持高亮。 */
+function isNavActive(key: ViewKey): boolean {
+  return panel.currentView === key || (key === 'checkin' && panel.currentView === 'packages')
+}
 
 function onRefresh(): void {
   panel.refresh()

@@ -165,6 +165,54 @@ export interface PackagesResponse {
   }>
 }
 
+/**
+ * Trae 积分快照（GET /panel/api/trae/credits）。
+ * 逐包明细来自上游 ide_user_ent_usage，desc 可能为「签到奖励」「每月赠送」等。
+ */
+export interface TraeCreditPack {
+  desc?: string
+  remaining?: number
+  limit?: number
+  used?: number
+  unlimited?: boolean
+  end_time?: number
+  [key: string]: unknown
+}
+export interface TraeCreditAccount {
+  name?: string
+  packs?: TraeCreditPack[]
+  has_balance?: boolean
+  error?: string
+  [key: string]: unknown
+}
+
+/** Qoder 单项额度（套餐内 / 附加签到）。 */
+export interface QoderQuota {
+  used?: number
+  remaining?: number
+  total?: number
+  percentage?: number
+  unit?: string
+  [key: string]: unknown
+}
+/**
+ * Qoder 额度（GET /panel/api/ide/qoder/usage[?email=]）。
+ * phase=ok 时 user_quota/add_on_quota 才有值；9999 年到期的 expires_at_ms 视为不过期。
+ */
+export interface QoderUsageResult {
+  email?: string
+  name?: string
+  uid?: string
+  plan_tier?: string
+  plan_tier_name?: string
+  user_quota?: QoderQuota | null
+  add_on_quota?: QoderQuota | null
+  expires_at_ms?: number
+  phase?: string
+  msg?: string
+  [key: string]: unknown
+}
+
 /** GET /panel/api/model_probes */
 export interface ModelProbesResponse {
   probes: Record<string, unknown>
@@ -221,8 +269,11 @@ export interface TaskQueueResponse {
   [key: string]: unknown
 }
 
-/** GET /panel/api/config */
+/** GET /panel/api/config —— 信封里带盘上配置（config 才是 CFG_MAP 的取值来源）。 */
 export interface ConfigResponse {
+  ok?: boolean
+  path?: string
+  config?: Record<string, unknown>
   [key: string]: unknown
 }
 
@@ -266,11 +317,11 @@ export interface QoderCheckinStatusResponse {
   [key: string]: unknown
 }
 
-/** Trae 积分快照。 */
+/** Trae 积分快照（逐包明细见 TraeCreditAccount）。 */
 export interface TraeCreditsResponse {
   ok?: boolean
   total?: number
-  accounts?: IdeAccount[]
+  accounts?: TraeCreditAccount[]
   [key: string]: unknown
 }
 

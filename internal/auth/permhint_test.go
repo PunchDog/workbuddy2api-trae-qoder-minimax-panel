@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// TestSaveAtomicPermissionHint 无写权限目录下保存，错误应包含 Docker chown 指引。
+// TestSaveAtomicPermissionHint 无写权限目录下保存，错误应包含可操作的权限指引。
 func TestSaveAtomicPermissionHint(t *testing.T) {
 	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
 		t.Skip("Windows 无 POSIX 权限语义 / root 无权限限制，跳过")
@@ -23,7 +23,7 @@ func TestSaveAtomicPermissionHint(t *testing.T) {
 	if err == nil {
 		t.Fatal("只读目录保存应失败")
 	}
-	if !strings.Contains(err.Error(), "chown") || !strings.Contains(err.Error(), "10001") {
-		t.Errorf("权限错误应包含 Docker 指引，实际: %v", err)
+	if !strings.Contains(err.Error(), "写权限") || !strings.Contains(err.Error(), "chmod") {
+		t.Errorf("权限错误应包含可操作指引，实际: %v", err)
 	}
 }

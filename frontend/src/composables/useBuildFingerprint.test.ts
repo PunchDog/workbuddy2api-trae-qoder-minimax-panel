@@ -66,6 +66,21 @@ describe('useBuildFingerprint —— D8 ETag 轮询', () => {
     expect(api.backVer.value).toBe('')
   })
 
+  it('新包首开：localStorage 残留旧 script src 不误报（Wails 重建回归）', async () => {
+    const { make, h } = setup()
+    h.queue.push('"build-A"')
+    values['wb2api.build'] = '/panel/assets/index-OLD.js'
+    vi.stubGlobal('document', {
+      querySelector: () => ({ getAttribute: () => '/panel/assets/index-NEW.js' }),
+    })
+    const api = make()
+    api.start()
+    await Promise.resolve()
+    expect(api.frontVer.value).toBe('index-NEW.js')
+    expect(api.mismatch.value).toBe(false)
+    expect(api.backVer.value).toBe('')
+  })
+
   it('ETag 变化触发失配提示，backVer 用诚实文案不伪造版本号', async () => {
     const { make, h } = setup()
     h.queue.push('"build-A"', '"build-B"')

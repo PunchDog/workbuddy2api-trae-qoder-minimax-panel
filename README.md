@@ -61,7 +61,7 @@
 > - **多账号合集 / 账号池轮转 / 一键切号 / 断路冷却 / 会话粘性**
 > - **每日签到 / 自动签到 / 批量签到 / 保活 / 积分查看**
 > - **OpenAI 兼容网关**、**OpenAI 兼容 API**、`/v1/chat/completions`、`/v1/responses`、**SSE 流式**
-> - **Go 实现**、**单文件部署**、**Docker**、**Web 管理面板**
+> - **Go 实现**、**单文件部署**、**Wails 桌面面板**
 >
 > Search keywords: `workbuddy` `workbuddy2api` `codebuddy` `codebuddy2api` `trae` `trae2api` `qoder` `qoder2api` `minimax` `minimax code` `doubao` `openai api gateway` `ai account pool` `daily check-in` `auto check-in` `keep-alive` `openai compatible api` `reverse proxy` `admin panel` `golang`
 
@@ -81,7 +81,7 @@
 <p align="center">
   <img alt="Go" src="https://img.shields.io/badge/Go-1.22.5-00ADD8?logo=go&logoColor=white&style=flat-square">
   <img alt="API" src="https://img.shields.io/badge/API-OpenAI_Compatible-412991?style=flat-square">
-  <img alt="Deploy" src="https://img.shields.io/badge/Deploy-Single_Binary%20%7C%20Docker-2496ED?style=flat-square">
+  <img alt="Deploy" src="https://img.shields.io/badge/Deploy-Single_Binary-2496ED?style=flat-square">
   <img alt="Transport" src="https://img.shields.io/badge/Transport-SSE%20%2F%20Streaming-0DBD8B?style=flat-square">
 </p>
 
@@ -130,7 +130,7 @@ WorkBuddy2API 是一个自托管的 **OpenAI 兼容反向代理网关**，将腾
 
 | 能力 | 说明 |
 |---|---|
-| 🔑 **OAuth 一键登录** | `login.sh` 设备授权流程，自动落盘凭证并重启容器加载新账号 |
+| 🔑 **OAuth 一键登录** | `login.sh` 设备授权流程，自动落盘凭证并重启服务加载新账号 |
 | 🔄 **多账号池** | 快过期积分加权 + 成本分层 + 加权随机选号，Top-5 候选 + 防惊群 |
 | 🛡️ **熔断与冷却** | 429 软冷却 600s 起指数退避（封顶 `soft_rate_max`）、404 固定 60s 短冷却、402 硬冷却至次日 04:00、连续失败熔断、在途租约限流 |
 | 🧲 **会话粘性** | 同一会话（`conversation_id`）尽量绑定同一账号，TTL 滚动续期，失败自动解绑，可镜像 Redis 防重启丢失 |
@@ -291,81 +291,26 @@ flowchart LR
 
 ### 环境要求
 
-- **Docker + Docker Compose**（服务端部署方式，镜像内已含低权限用户与全部工具脚本）——或
-- **Windows / macOS / Linux 直接跑单文件二进制**（无需 Docker，见下方「Windows 单文件运行」）
+- **Windows 桌面单文件**（推荐，Wails 面板）或 **Windows / macOS / Linux 单文件网关**
 - 一个或多个已注册的 CodeBuddy 账号，用于 OAuth 登录
 - 宿主机 Go ≥ 1.22（仅从源码构建时需要）
 
-### 方式〇：GHCR 镜像（免克隆免构建）
-
-CI 会自动构建多架构镜像（`amd64` / `arm64`）并发布到 GHCR，`git clone` 之外的部署路径：
-
-```bash
-# 1. 准备配置与数据目录
-mkdir -p auths data && cp config.example.json config.json
-#    建议编辑 config.json 设置 api_key（或留空由程序自动生成随机密钥）
-
-# 2. 拉取并运行
-docker run -d --name workbuddy2api \
-  -p 7863:7863 -e TZ=Asia/Shanghai \
-  -v ./auths:/app/auths -v ./data:/app/data -v ./config.json:/app/config.json \
-  ghcr.io/linguo2625469/workbuddy2api-panel:latest
-
-# 3. 健康检查（无可用账号时返回 503）
-curl -s http://localhost:7863/healthz
-```
-
-> **首次发布后须将包设为公开**：GitHub 仓库页 → Packages → `workbuddy2api-panel` →
-> Package settings → Change visibility → Public，否则拉取需要 `docker login ghcr.io`。
->
-> 镜像 tag 规则：`main` 分支推送 `latest` / `main` / `sha-xxxxxx`；打 `v*` tag 额外发布
-> `1.2.3` / `1.2` / `1` 语义化版本；PR 仅构建验证、不推送。
-
-### 方式一：Docker Compose（推荐服务器部署）
-
-```bash
-# 1. 克隆
-git clone https://github.com/linguo2625469/workbuddy2api-panel.git
-cd workbuddy2api-panel
-
-# 2. 准备配置（compose 挂载此文件，缺失会导致容器启动失败）
-cp config.example.json config.json
-#    建议编辑 config.json 设置 api_key（或留空由程序自动生成随机密钥）
-
-# 3. 启动（首次会构建镜像，约 1-2 分钟）
-docker compose up -d --build
-
-# 4. 健康检查（无可用账号时返回 503）
-curl -s http://localhost:7863/healthz
-# {"healthy":0,"total":0,"service":"workbuddy2api"}
-```
-
-启动后打开 **`http://localhost:7863/panel/`**，用面板「添加账号」完成登录（见下节）。
-
-常用运维命令：
-
-```bash
-docker compose logs -f          # 跟踪日志
-docker compose restart          # 重启
-docker compose down             # 停止并移除容器（数据在 ./auths 与 ./data，不受影响）
-```
-
-### 方式二：Windows 单文件运行（无需 Docker）
+### 方式一：Windows 单文件运行
 
 ```powershell
-# 1) 下载 Release 中的 wb2api.exe，或从源码构建
-go build -trimpath -ldflags="-s -w" -o wb2api.exe ./cmd/server
+# 1) 下载 Release 或本地构建桌面 exe
+task build:desktop
+# 或
+go build -trimpath -tags production -ldflags="-s -w -H=windowsgui" -o dist\WorkBuddy2API.exe ./cmd/app
 
-# 2) 直接运行：首次启动自动生成 config.json（含随机 api_key，日志打印一次）
-.\wb2api.exe -config config.json
-
-# 3) 浏览器打开面板添加账号
-#    http://127.0.0.1:7863/panel/
+# 2) 双击 dist\WorkBuddy2API.exe：启动网关并打开 Wails 面板
 ```
 
 exe 为**单文件自包含**（前端资源已 embed 进二进制），拷到任意 Windows 机器即可运行，只需保证 `auths/`（凭证）与 `data/`（状态）目录可写。
 
-### 方式三：源码运行（开发调试）
+面板只在 Wails 窗口显示；页面入口有门禁令牌（默认 `123789abc`，可在 config.json 的 `panel.access_token` 覆盖），浏览器直接访问 `/panel/` 会被拒绝。
+
+### 方式二：源码运行（开发调试）
 
 ```bash
 go build ./...
@@ -430,7 +375,7 @@ CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o credit ./cmd/credit
 # 按提示在浏览器打开授权链接 → 回到终端确认 → 凭证落盘 auths/workbuddy-<uid>.json
 ```
 
-`login.sh` 内置授权 URL 获取 + 浏览器登录 + token 轮询 + 首次签到 + 凭证落盘 + 容器重启，全程无 PKCE（state 由服务端签发）。账号池在容器启动时用 `auths/` 目录自动对齐，新增凭证文件即自动发现。
+`login.sh` 内置授权 URL 获取 + 浏览器登录 + token 轮询 + 首次签到 + 凭证落盘 + 手动重启服务，全程无 PKCE（state 由服务端签发）。账号池在服务启动时用 `auths/` 目录自动对齐，新增凭证文件即自动发现。
 
 > Windows 用户请用方式 A（或 WSL）；`login.sh` 需要 python3。
 
@@ -717,7 +662,7 @@ WARN: [server] stream ...: saw M native tool call block(s) but repaired none (to
 
 ### 定时任务
 
-六类任务各自独立排程、各有开关，互不影响。容器时区由 `TZ` 控制（compose 默认 `Asia/Shanghai`）。
+六类任务各自独立排程、各有开关，互不影响。服务时区由 `TZ` 控制。
 
 | 任务 | 开关（默认 true） | 时刻（默认） | 行为 |
 |---|---|---|---|
@@ -808,7 +753,7 @@ WARN: [server] stream ...: saw M native tool call block(s) but repaired none (to
 
 - 领养门槛未达标时上游返回 HTTP 400，每账号每自然日只尝试一次（跨日重试，记录仅存内存）；门槛可用活跃上报解除
 - 限速：账号间间隔 800ms
-- 每自然日 1 次派出：按 CST（Asia/Shanghai）自然日重置，与容器 `TZ` 无关
+- 每自然日 1 次派出：按 CST（Asia/Shanghai）自然日重置，与服务 `TZ` 无关
 - 失败隔离：单账号失败只跳过该账号当趟；401 不强刷（token 刷新交保活时点）
 
 ## API 端点
@@ -839,14 +784,14 @@ http://127.0.0.1:7863/panel/
 **账号 | 状态 | 操作**。
 
 鉴权与 API 同口径：`api_key` 非空时面板要求输入一次密钥（浏览器 localStorage 记住）；为空则直接可用。
-界面支持**明暗主题切换**（首次跟随系统偏好，点击按钮两态翻转并记住选择），左侧导航九个视图：
+界面支持**明暗主题切换**（首次跟随系统偏好，点击按钮两态翻转并记住选择），左侧导航七个视图（签到池与积分构成为同一页面的两个 tab）：
 
 | 视图 | 功能 |
 |---|---|
 | **账号池** | 统计条（账号总数 / 可用 / 冷却中 / 已禁用 / 暂停选号 / 积分剩余·总额 / 粘性会话）+ 账号表：健康色条与状态标签（可用 / 限流冷却 / 积分冷却 / 熔断 / 连败降权 / 已禁用 / 已暂停选号）、积分量条、成功·失败计数、在途、最近一次用量（次数 / token / 延迟 / 速率）、最近成功时间；单号操作 签到 / 余额 / 任务 / 解冻 / 暂停选号 / 恢复选号 / 禁用 / 移除；批量「全部签到」「旅行巡检」「活跃上报」「全部保活」；下方**积分到期提醒**卡（每账号最近到期批次、该批余额、到期前日均需耗量，色点标危险度） |
-| **签到池** | 一键签到（主号池）+ WorkBuddy / Qoder / MiniMax / Trae 各平台签到与**积分总览**（账号 / 积分余额 / 签到可得三列）；Trae 支持「全部续期」与「从客户端提取」 |
+| **签到池 · 签到池 tab** | 一键签到（主号池）+ WorkBuddy / Qoder / MiniMax / Trae 各平台签到与**积分总览**（账号 / 积分余额 / 签到可得三列）；Trae 支持「全部续期」与「从客户端提取」 |
 | **用量** | 指标卡（请求数 / 总 token / prompt / completion / 失败尝试 / 平均延迟，含占比与吐字速率）+ **Token 时序图**（渐变堆叠柱、均值参考线、峰值标注、悬停看单桶明细）+ **用量明细**（按账号 / 按模型 / 按域切换，可按合计 Token / 请求数 / 失败数 / 平均延迟排序，含 prompt·completion 占比条）+ **积分扣除历史**（按账号 / 按模型，折算「积分 / 1M Token」） |
-| **积分构成** | **积分到期分布**（按批次到期日聚合，颜色区分账号）+ **账号对比**（按来源归并的面额 / 余额 / 包数卡片与混合构成条）+ 逐包明细（按到期日排序，默认展开最近到期的 `panel.package_detail_limit` 个，其余与已用完的包折叠） |
+| **签到池 · 积分构成 tab** | **积分到期分布**（按批次到期日聚合，颜色区分账号）+ **账号对比**（按来源归并的面额 / 余额 / 包数卡片与混合构成条）+ 逐包明细（按到期日排序，默认展开最近到期的 `panel.package_detail_limit` 个，其余与已用完的包折叠） |
 | **任务中心** | 成长任务队列：一键扫描全部账号待办 → 按账号排队执行（账号内串行，账号间可选并发 1-3），进度实时更新；另含开学季券码查询。详见 [任务中心](#-任务中心面板新视图) |
 | **IDE 账号池** | Qoder / Trae IDE / WorkBuddy 三套 IDE 账号的号池：添加当前登录账号（Qoder / Trae 走本地客户端取号，WorkBuddy 走浏览器官方登录）、一键切号、移除、签到与积分查询；WorkBuddy 可选版本（国内版 / 国际版 / 国际备用），并可「同步本机账号」把客户端已登录账号并入号池 |
 | **模型与档位** | 实时查询上游：每模型的积分倍率（含限时免费 / 夜间折扣等**生效价**与划线牌价）、默认思考档、支持的档位（含「off（可关）」）、上下文长度与最大输出；存在探测数据时最大输出列显示**实测上限与钳制告警**（见「探测模型真实输出上限」）。支持**按条件查询**：关键词（ID / 名称 / 描述 / 厂商 / 标签，空格分词 AND）、域（CN / Global）、能力（工具 / 视觉 / 思考 / 默认）、思考档位、价格（折扣 / 限时免费 / 打折），以及按倍率 / 上下文 / 最大输出 / ID 排序。下方**模型锁池**表列出被上游按模型限流的模型（整池不可用 / 没号可用 / 部分限流）、可选与总数、锁定账号数、最早解锁与全池解锁倒计时、限流原因，无锁定时显示「所有模型均可选」 |
@@ -859,7 +804,7 @@ http://127.0.0.1:7863/panel/
 
 「用量」与「运行日志 → 请求记录」共用同一个时间范围控件，预设 **今天 / 近 24 小时 / 近 3 天 / 近 7 天 / 近 30 天 / 全部历史 / 自定义**（自定义展开起止时间输入，精确到分钟；起止颠倒就地标红）：
 
-- 「今天」与「自定义」的区间由**浏览器按本地时区**算好后发给服务端——服务端时区未必与浏览器一致（容器常挂 `TZ=Asia/Shanghai`），让服务端算"今天"会在跨时区时切错日子；
+- 「今天」与「自定义」的区间由**浏览器按本地时区**算好后发给服务端——服务端时区未必与浏览器一致（服务常挂 `TZ=Asia/Shanghai`），让服务端算"今天"会在跨时区时切错日子；
 - 滚动预设走服务端的 `hours` 口径（当前整点往回 N-1 小时），与既有统计口径逐位一致（前端自己减 N 小时会在边界多算/少算一个桶）；
 - 用量侧由 `usage.Window` 统一三种窗口口径，并在响应里回显实际生效区间（`window_from` / `window_to`），总览右上角因此会显示形如 `9-30 00:00 → 9-30 15:02 · 14 个分桶 · 数据自 …` 的口径说明；
 - 请求记录的时间过滤在**归档侧**完成（`reqlog.Filter.From/To`，而不是筛已拉取的条目），所以区间落在更早时段时也能取到记录。
@@ -917,7 +862,7 @@ http://127.0.0.1:7863/panel/
 
 响应同时带 `X-Service: workbuddy2api` 头。这两个身份标识用于区分**本网关**与同端口上可能残留的其他服务——对方即使返回 2xx 也不会带该字段 / 头，宿主探测据此避免"假成功"。
 
-**宿主健康探测指引**：强校验（推荐）用 `/status` + `api_key`——只有持有正确 `api_key` 的本网关返回 200，其他服务返回 401 / 404；弱校验（不适合持 key 的负载均衡器）用 `/healthz` + `service` 字段判据（`/healthz` 恒无鉴权，`service == "workbuddy2api"` 才算命中本网关）。容器自带 `HEALTHCHECK` 用的就是弱校验（仅进程内自检，够用）。
+**宿主健康探测指引**：强校验（推荐）用 `/status` + `api_key`——只有持有正确 `api_key` 的本网关返回 200，其他服务返回 401 / 404；弱校验（不适合持 key 的负载均衡器）用 `/healthz` + `service` 字段判据（`/healthz` 恒无鉴权，`service == "workbuddy2api"` 才算命中本网关）。
 
 ### 流式行为细节
 
@@ -983,28 +928,17 @@ http://127.0.0.1:7863/panel/
 
 ## 部署运维
 
-### Docker 镜像
-
-多阶段镜像（`golang:1.23-alpine` 构建 → `alpine:3.20` 运行）一次编译全部四个二进制并随镜像分发：
-
-- **wb2api**（主服务）、**signin_bin**、**login**、**credit** + 脚本（`login.sh` / `signin.sh` / `credit.sh` / `scripts/probe_active.py`）
-- 以 `app` 用户（uid 10001）运行，`app/auths` 与 `app/data` 预建
-- 镜像内默认落 `config.example.json` 作为空配置（不含密钥），生产用挂载卷覆盖 `/app/config.json`
-- 内置 `HEALTHCHECK`（`wget /healthz`，30s 间隔）
-
-账号 / 数据通过 `docker-compose.yml` 卷挂载持久化：`./auths`、`./data`、`./config.json`。
-
 ### 工具脚本
 
 | 脚本 | 用途 |
 |---|---|
-| `./login.sh` | OAuth 登录 → 落盘 auth → 重启容器 |
+| `./login.sh` | OAuth 登录 → 落盘 auth → 提示重启服务 |
 | `./signin.sh [auths_dir]` | 批量签到（过期先刷新） |
 | `./credit.sh` / `./credit.sh -json` | 积分日报（美化 / 原始 JSON） |
 | `python3 scripts/probe_active.py` | 活跃上报手动诊断 / 补跑（probe=只读 / report=单号上报 / unlock=单号领猫 / ALL=全池；写操作默认 dry-run，需 `--yes`） |
 | `python3 scripts/probe_max_tokens.py` | 探测各模型**真实输出上限**（区分静默钳制与模型主动收尾），`--panel-out` 结果可直接进面板展示（见下节） |
 
-二进制不在 git 中：脚本首次使用自动 `go build` 对应 `cmd/*`（Docker 镜像内已预编译）。
+二进制不在 git 中：脚本首次使用自动 `go build` 对应 `cmd/*`。
 
 ### 探测模型真实输出上限
 
@@ -1045,20 +979,20 @@ python3 scripts/probe_max_tokens.py   --base http://127.0.0.1:7863/v1 --key sk-x
 
 - **位置**：`./auths`（`auth_dir` 可配），文件名 `workbuddy-<uid>.json`
 - **内容**：明文 `accessToken` / `refreshToken` + 账号元信息（`account.uid` / `enterpriseId` / `nickname`）
-- **权限**：容器内以 `app` 用户（uid 10001）运行；token 刷新由 `SaveAtomic` 以 `0600` 原子写回（tmp + rename）；`login.sh` 首次落盘遵循登录 umask，建议手动 `chmod 600 auths/*.json`
+- **权限**：token 刷新由 `SaveAtomic` 以 `0600` 原子写回（tmp + rename）；`login.sh` 首次落盘遵循登录 umask，建议手动 `chmod 600 auths/*.json`
 - **切勿提交 git**：`.gitignore` 已排除 `auths/`、`data/`、`backups/`、`config.json`、`*.key`、`*.pem`、`*.env`、`docs/` 及除 README 外的全部 `*.md` 工作文档
 
 ### 2. 网络暴露与日志敏感度
 
-- 默认监听 `:7863`，compose 暴露 `0.0.0.0:7863`，**无内置 TLS**；公网部署必须设置 `api_key`，建议前置反代 / 内网
+- 默认监听 `:7863`（桌面启动器写 `127.0.0.1:7863`），**无内置 TLS**；对外部署必须设置 `api_key`，建议前置反代 / 内网
 - 请求日志字段：序号 / 模型 / 模式 / 状态码 / **uid 前 8 位** / TTFB / token 数——**不含** `accessToken` / `refreshToken` / `api_key` 明文（不读取 `Authorization` 头）
-- 日志写 **stdout / stderr**（容器内进入 `docker logs`），代码无任何落盘日志文件
+- 日志写 **stdout / stderr**，代码无任何落盘日志文件
 
 ### 3. 发布来源与合规边界
 
-- **发布产物**：GitHub Actions 在打 `v*` tag 时构建多平台二进制并上传 Release（zip / tar.gz + `checksums.txt`）；GHCR 另发布多架构镜像。**不发版时的日常用法仍是源码自构建**（Dockerfile 多阶段在本地构建时完成）
+- **发布产物**：GitHub Actions 在打 `v*` tag 时构建多平台二进制并上传 Release（zip / tar.gz + `checksums.txt`）。**不发版时的日常用法仍是源码自构建**
 - 登录 / 签到 / 积分工具：`./login.sh` / `./signin.sh` / `./credit.sh`
-- **产物校验和**：Release 附 `checksums.txt`（sha256）；`go.sum` 另行约束 Go 模块依赖。Docker 镜像由本地 `docker compose build` 或 GHCR 构建，未引用第三方镜像
+- **产物校验和**：Release 附 `checksums.txt`（sha256）；`go.sum` 另行约束 Go 模块依赖，未引用第三方镜像
 - 上游 CodeBuddy 属腾讯系商业产品，本项目是其**非官方 OpenAI 兼容网关**；使用其账号做 API 网关涉及目标平台服务条款与账号风险，作者不对账号封禁、条款违约或使用结果负责
 
 ### 4. 授权使用边界
@@ -1146,24 +1080,6 @@ python3 scripts/probe_max_tokens.py   --base http://127.0.0.1:7863/v1 --key sk-x
 - 多图/长上下文会话（历史图片每轮以 base64 重发，编码再膨胀约 37%）不会再撞网关侧 413
 - 若上游真的返回 413/超限错误，网关按既有错误分类链路如实透传（不打码、不罚号——超限是请求侧问题）
 - 客户端中途断流导致的半截 body 在读入阶段即报 `400 invalid_request`，不会把截断 JSON 喂给上游（issue #41 语义保留在读错误路径）
-
-### Docker 部署登录后报「写入 auths/…json.tmp 失败： permission denied」？
-
-容器以 `app` 用户（uid 10001）运行，而宿主机挂载的 `./auths`、`./data` 目录属主不是它——写凭证 tmp 文件被拒。三种解法任选（前两种均**无需 root 容器**）：
-
-```bash
-# 方案 1（推荐，非 root）：让容器以你自己的 uid 运行——挂载目录本来就是你建的
-PUID=$(id -u) PGID=$(id -g) docker compose up -d --force-recreate
-# 或写进 .env 文件长期生效（.env 已被 .gitignore 忽略）：
-#   echo "PUID=1000" > .env && echo "PGID=1000" >> .env
-
-# 方案 2：把挂载目录属主交给容器默认用户（需要 sudo）
-sudo chown -R 10001:10001 ./auths ./data ./config.json
-
-# 方案 3：compose 设 user: "0:0" 以 root 运行（NAS/群晖不便 chown 时用）
-```
-
-报错信息里自带这条指引；compose 的 `user` 已参数化为 `${PUID:-10001}:${PGID:-10001}`。
 
 ### 账号被 Disable 后如何恢复？
 

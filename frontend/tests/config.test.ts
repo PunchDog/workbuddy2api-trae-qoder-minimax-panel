@@ -45,6 +45,19 @@ describe('配置表单与 CFG_MAP 对齐（TestConfigFormMatchesCFGMap）', () =
     fields.soft_rate = { type: 'text', value: '1h30m' }
     expect(durationBad('soft_rate', fields)).toBe(false)
   })
+
+  it('非时长字段不误报格式错误（整页红字回归守卫）', () => {
+    const fields: ConfigFields = fillConfig({
+      listen: ':7863',
+      schedule: { checkin_hours: [9, 21] },
+      api_key: 'sk-abc',
+      qwen: { console_cookie: 'session=abc' },
+    })
+    // 这些值都不是合法 Go 时长，但字段本身不是时长字段，绝不能标红。
+    for (const name of ['listen', 'checkin_hours', 'api_key', 'qwen_console_cookie']) {
+      expect(durationBad(name, fields)).toBe(false)
+    }
+  })
 })
 
 describe('collectConfig 空串语义（TestAppJSCollectConfigClearable）', () => {
@@ -74,4 +87,5 @@ describe('collectConfig 空串语义（TestAppJSCollectConfigClearable）', () =
     const out = collectConfig({ checkin_hours: mk('9, 21') }) as Record<string, any>
     expect(out.schedule.checkin_hours).toEqual([9, 21])
   })
+
 })

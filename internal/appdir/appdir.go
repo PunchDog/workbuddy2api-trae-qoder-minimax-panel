@@ -10,8 +10,7 @@
 // （Resolve）统一落在 exe 旁，配置与数据不分家。
 //
 // 注意：exe 需放在可写目录；若所在目录只读，配置与号池都会写入失败。
-// Docker 走 cmd/server + WORKDIR /app + 显式 -config /app/config.json，
-// 不经过本入口，绝对路径优先，不受 Chdir 影响。
+// 走 cmd/server 并显式传 -config 绝对路径时不经过本入口，绝对路径优先。
 package appdir
 
 import (

@@ -43,6 +43,11 @@ type Config struct {
 	RedisMode string               // "upstash" / "noop"，仅观测透出
 	Version   string               // 面板版本号（展示用）
 
+	// AccessToken 面板页面门禁令牌：/panel/ 与 /panel/assets/* 必须携带
+	// ?token= 或已通过校验的 Cookie。空 = 不启用门禁（测试/本地调试）。
+	// 生产默认由 appserver 注入 config 的 panel.access_token。
+	AccessToken string
+
 	// Live 运行期可变配置（在线改配置立即生效）。
 	Live *livecfg.Holder
 
@@ -361,6 +366,9 @@ func (p *Panel) expiringSoonWindow() time.Duration {
 
 // overview 总览：池计数 + 每账号状态 + 面板元信息。
 func (p *Panel) overview(w http.ResponseWriter, r *http.Request) {
+	// 惰性把 IDE 号池里已登录的 WorkBuddy 账号投影进主池：浏览器登录只写 IDE
+	// 号池，不投影则 accounts 恒为空、签到池卡片与账号健康全 0。
+	p.syncIDEWorkBuddyToMainPool(false)
 	// 用 WithPaused 而不是 CountsDetailed：后者把暂停号并进 disabled（/status 的
 	// 「不可用」口径），而概况卡片要分开展示（issue #125）。
 	total, healthy, cooling, disabled, paused, inFlightFull := p.cfg.Pool.CountsDetailedWithPaused()

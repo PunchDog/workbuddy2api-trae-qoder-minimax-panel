@@ -17,7 +17,7 @@
           <label class="dlg-field">版本
             <select v-model="form.edition" class="wb-inline-select">
               <option value="cn">国内版（cn）</option>
-              <option value="global">国际版（global）</option>
+              <option value="intl">国际版（intl）</option>
             </select>
           </label>
           <TButton theme="primary" :loading="busy" @click="workbuddyLogin">浏览器登录并添加</TButton>

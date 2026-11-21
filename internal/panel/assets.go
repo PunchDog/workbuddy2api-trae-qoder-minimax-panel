@@ -61,6 +61,12 @@ func assetContentType(name string) string {
 // assets 提供 /panel/assets/{path...}。Vite 产物名自带内容哈希，资源更新必然
 // 换文件名；这里仍写 ETag + no-cache，与 index 的缓存治理行为保持一致。
 func (p *Panel) assets(w http.ResponseWriter, r *http.Request) {
+	if !p.checkPanelToken(w, r) {
+		setSecurityHeaders(w)
+		w.Header().Set("Cache-Control", "no-store")
+		writeErr(w, http.StatusForbidden, "panel access denied: missing or invalid token")
+		return
+	}
 	if distFSErr != nil {
 		setSecurityHeaders(w)
 		writeErr(w, http.StatusInternalServerError, "dist filesystem: "+distFSErr.Error())

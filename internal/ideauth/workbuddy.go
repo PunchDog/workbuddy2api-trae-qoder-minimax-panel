@@ -46,16 +46,20 @@ type WorkBuddyEdition string
 const (
 	// WorkBuddyCN 国内版：www.workbuddy.cn，认证类型 account-scoped-external-link。
 	WorkBuddyCN WorkBuddyEdition = "cn"
-	// WorkBuddyIntl 国际版（copilot）：copilot.tencent.com，cli-external-link。
+	// WorkBuddyIntl 国际版：www.workbuddy.ai（与 upstream global base 同域）。
 	WorkBuddyIntl WorkBuddyEdition = "intl"
 	// WorkBuddyIntlBuddy 国际版（tencentbuddy）：wb.tencentbuddy.com。
 	WorkBuddyIntlBuddy WorkBuddyEdition = "intlbuddy"
 )
 
 // WorkBuddyEndpoints 各版本对应的服务端点。
+//
+// intl 必须是 www.workbuddy.ai：曾误配 copilot.tencent.com（CodeBuddy 国内 CLI 域），
+// 该域 /login 会被重定向到 www.codebuddy.cn，用户选「国际版」也只会看到国内扫码页，
+// 且登录出来的账号 domain 是 cn 域、realm 判成国内，国际号池永远加不进去。
 var WorkBuddyEndpoints = map[WorkBuddyEdition]string{
 	WorkBuddyCN:        "https://www.workbuddy.cn",
-	WorkBuddyIntl:      "https://copilot.tencent.com",
+	WorkBuddyIntl:      "https://www.workbuddy.ai",
 	WorkBuddyIntlBuddy: "https://wb.tencentbuddy.com",
 }
 

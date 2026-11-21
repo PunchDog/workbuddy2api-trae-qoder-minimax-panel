@@ -340,14 +340,11 @@ func (a *Auth) SaveAtomic() error {
 	}
 	tmp := a.FilePath + ".tmp"
 	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
-		// Docker bind-mount 权限问题的典型现场：容器内 app 用户（uid 10001）
-		// 对宿主机挂载目录无写权限。给出可操作指引而不是裸 syscall 错误。
+		// 权限问题的典型现场：进程用户对目标目录无写权限。
+		// 给出可操作指引而不是裸 syscall 错误。
 		msg := fmt.Sprintf("写入 %s 失败: %v", tmp, err)
 		if errors.Is(err, fs.ErrPermission) {
-			msg += "\n（Docker 部署：容器内用户对宿主机挂载目录无写权限。解法任选：" +
-				"1) 以本机 uid 运行容器：PUID=$(id -u) PGID=$(id -g) docker compose up -d；" +
-				"2) sudo chown -R 10001:10001 ./auths ./data ./config.json；" +
-				"3) compose 设 user: \"0:0\" 以 root 运行）"
+			msg += "\n（请确认进程用户对 auths/ 与 data/ 有写权限：chmod -R u+rwX ./auths ./data，或将程序放到可写目录）"
 		}
 		return errors.New(msg)
 	}

@@ -140,3 +140,62 @@ describe('快照到期排序（TestAppJSExpirySnapshotRenders）', () => {
     expect(out.map((a) => a.nickname)).toEqual(['秋', '秋千易', '长期包'])
   })
 })
+
+describe('IDE 平台积分卡（Trae / Qoder）', () => {
+  it('traeCreditCards 合并同名包为一段并汇总剩余/已用到期', async () => {
+    const { traeCreditCards } = await import('../src/utils/packages')
+    const cards = traeCreditCards([{
+      name: 'TraeA',
+      packs: [
+        { desc: '签到奖励', remaining: 100, limit: 100, end_time: 1735689600 },
+        { desc: '签到奖励', remaining: 50, limit: 100, end_time: 1735776000 },
+        { desc: '每月赠送', remaining: 200, limit: 500, unlimited: false },
+      ],
+    }])
+    expect(cards).toHaveLength(1)
+    expect(cards[0].remain).toBe(350)
+    expect(cards[0].total).toBe(700)
+    const signin = cards[0].segments.find((s) => s.label === '签到奖励')
+    expect(signin?.count).toBe(2)
+    expect(signin?.remain).toBe(150)
+    expect(cards[0].note).toContain('签到奖励：+100 Credits/天')
+  })
+
+  it('traeCreditCards 无逐包明细时标 error 而非伪造积分', async () => {
+    const { traeCreditCards } = await import('../src/utils/packages')
+    const cards = traeCreditCards([{ name: 'TraeB' }])
+    expect(cards[0].error).toBeTruthy()
+    expect(cards[0].remain).toBe(0)
+  })
+
+  it('qoderCreditCards 合并套餐内+附加，9999 年到期视为不过期', async () => {
+    const { qoderCreditCards } = await import('../src/utils/packages')
+    const cards = qoderCreditCards(
+      [{ email: 'a@x.com', name: 'QoderA', realm: 'cn' }],
+      [{
+        phase: 'ok', plan_tier_name: 'Pro',
+        user_quota: { remaining: 1000, total: 2000, used: 1000 },
+        add_on_quota: { remaining: 300, total: 500, used: 200 },
+        expires_at_ms: 253402214400000,
+      }],
+    )
+    expect(cards).toHaveLength(1)
+    expect(cards[0].realmChip).toBe('国内版')
+    expect(cards[0].remain).toBe(1300)
+    expect(cards[0].total).toBe(2500)
+    expect(cards[0].used).toBe(1200)
+    expect(cards[0].note).toContain('不过期')
+    expect(cards[0].segments.map((s) => s.label)).toEqual(['套餐内', '附加/签到'])
+  })
+
+  it('qoderCreditCards phase!=ok 的账号标 error 不伪造积分', async () => {
+    const { qoderCreditCards } = await import('../src/utils/packages')
+    const cards = qoderCreditCards(
+      [{ email: 'b@x.com', realm: 'intl' }],
+      [{ phase: 'login_required', msg: '未登录' }],
+    )
+    expect(cards[0].realmChip).toBe('国际版')
+    expect(cards[0].error).toContain('未登录')
+    expect(cards[0].remain).toBe(0)
+  })
+})

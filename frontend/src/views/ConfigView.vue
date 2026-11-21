@@ -267,7 +267,10 @@ async function load(): Promise<void> {
   panel.beginLoad()
   try {
     const data = await api<ConfigResponse>('config')
-    applyConfig(data)
+    // 后端 GET /panel/api/config 的响应是 {ok, path, config} 信封，真正配置在 config 里。
+    // 此前直接把信封喂给 fillConfig，所有字段都取不到值（表单一律空白），
+    // 保存时覆盖型字段还会照发空串把 user_agent / *_api_key 抹掉——这里按信封解包。
+    applyConfig(data?.config ?? data)
   } catch (e) {
     panel.setError((e as Error).message)
   } finally {

@@ -28,6 +28,10 @@ type Config struct {
 	Panel struct {
 		// PackageDetailLimit 积分构成页单账号默认展示的最近到期包数；<=0 回落 5。
 		PackageDetailLimit int `json:"package_detail_limit"`
+		// AccessToken 面板页面门禁令牌：打开 /panel/ 必须携带 ?token= 或已通过
+		// 的 Cookie。空值由 normalize 回落默认 123789abc；可用本字段或
+		// WB2A_PANEL_ACCESS_TOKEN 覆盖。门禁只保护页面入口，API 仍走 api_key。
+		AccessToken string `json:"access_token"`
 	} `json:"panel"`
 
 	Logging struct {
@@ -314,6 +318,10 @@ type Config struct {
 	ServerReadTimeoutDur time.Duration `json:"-"`
 }
 
+// DefaultPanelAccessToken 面板页面门禁默认令牌。
+// 桌面启动器会自动拼进 WebView URL；浏览器手动访问需带 ?token=。
+const DefaultPanelAccessToken = "123789abc"
+
 // Default 默认配置。
 func Default() *Config {
 	c := &Config{
@@ -326,6 +334,8 @@ func Default() *Config {
 	c.Cooldown.SoftRateMax = "2h"
 	c.Server.ReadTimeout = "300s"
 	c.Panel.PackageDetailLimit = 5
+	// 面板门禁默认令牌：桌面启动器把它拼进 WebView URL；浏览器无令牌打不开页面。
+	c.Panel.AccessToken = DefaultPanelAccessToken
 	c.Logging.RequestArchiveEnabled = true
 	c.Logging.RequestRetentionDays = 7
 	c.Logging.RequestArchiveMaxMB = 100
@@ -406,11 +416,10 @@ func Default() *Config {
 func Load(path string) (*Config, error) {
 	c := Default()
 	if path != "" {
-		// 目录检查：Docker bind mount 在宿主机文件缺失时会静默创建同名目录，
+		// 目录检查：宿主机文件缺失时某些挂载方式会静默创建同名目录，
 		// 直接 ReadFile 会报 "Incorrect function" 之类晦涩错误，这里给出可操作提示。
 		if st, statErr := os.Stat(path); statErr == nil && st.IsDir() {
 			return nil, fmt.Errorf("config %s 是目录而非文件——"+
-				"Docker 部署时若宿主机缺少 config.json，bind mount 会创建同名目录。"+
 				"请先 `cp config.example.json config.json` 或删除该目录（程序会自动生成配置）", path)
 		}
 		raw, err := os.ReadFile(path)
@@ -489,8 +498,8 @@ func EnsureAPIKey(c *Config, path string) (string, error) {
 	return key, nil
 }
 
-// writeConfigAtomic 原子替换配置文件；Docker 单文件 bind mount 无法 rename
-// （Linux EBUSY）时回退原地写（与面板保存配置同一套部署形态兼容）。
+// writeConfigAtomic 原子替换配置文件；rename 在只读/单文件挂载场景返回
+// EBUSY 时回退原地写（与面板保存配置同一套部署形态兼容）。
 func writeConfigAtomic(path string, out []byte) error {
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, out, 0o600); err != nil {
@@ -503,7 +512,7 @@ func writeConfigAtomic(path string, out []byte) error {
 		f, openErr := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0o600)
 		if openErr != nil {
 			_ = os.Remove(tmp)
-			return fmt.Errorf("replace config (bind mount fallback): %w", openErr)
+			return fmt.Errorf("replace config (inplace fallback): %w", openErr)
 		}
 		_, writeErr := f.Write(out)
 		if writeErr == nil {
@@ -512,11 +521,11 @@ func writeConfigAtomic(path string, out []byte) error {
 		closeErr := f.Close()
 		// 写失败时保留 tmp（挂载文件已被 O_TRUNC 破坏，tmp 里是完整新内容，可手工恢复）。
 		if writeErr != nil {
-			return fmt.Errorf("replace config (bind mount fallback, 完整新内容保留在 %s): %w", tmp, writeErr)
+			return fmt.Errorf("replace config (inplace fallback, 完整新内容保留在 %s): %w", tmp, writeErr)
 		}
 		_ = os.Remove(tmp)
 		if closeErr != nil {
-			return fmt.Errorf("replace config (bind mount fallback): %w", closeErr)
+			return fmt.Errorf("replace config (inplace fallback): %w", closeErr)
 		}
 	}
 	return nil
@@ -647,6 +656,10 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("WB2A_OPENCODE_USAGE_URL"); v != "" {
 		c.OpenCode.UsageURL = v
+	}
+	// 面板门禁令牌可用 env 注入（无配置文件/自动化场景）。
+	if v := os.Getenv("WB2A_PANEL_ACCESS_TOKEN"); v != "" {
+		c.Panel.AccessToken = v
 	}
 }
 
@@ -849,6 +862,12 @@ func (c *Config) normalize() error {
 		} else if d <= 0 {
 			return fmt.Errorf("opencode.timeout: 非正时长 %q 无意义", s)
 		}
+	}
+	// 面板门禁令牌：去空白；空值回落默认（与 Default 同口径，防手改配置漏填）。
+	if s := strings.TrimSpace(c.Panel.AccessToken); s != "" {
+		c.Panel.AccessToken = s
+	} else {
+		c.Panel.AccessToken = DefaultPanelAccessToken
 	}
 	if err := c.validateScheduleHours(); err != nil {
 		return err

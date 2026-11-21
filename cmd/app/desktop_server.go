@@ -2,15 +2,15 @@
 
 package main
 
-import "os/exec"
+import "errors"
 
 /**
  * desktop_server.go —— `-tags server` 构建时的桌面壳降级实现。
  *
- * 该 tag 用于不链接 Wails/CGO 的启动器构建；无参模式退化为现役「打开默认
- * 浏览器」行为，保证 `--server` / `--stop` 与 Docker/cmd/server 路径零改动。
- * 正常桌面 exe 使用 desktop.go，不编译本文件。
+ * 该 tag 用于不链接 Wails/CGO 的启动器构建。面板已启用页面门禁，且产品口径
+ * 是「只在 Wails 显示」，因此这里不再拉起默认浏览器，直接返回错误；
+ * `--server` / `--stop` 无头路径不受影响。
  */
-func startDesktop(panelURL string, _stopGateway func(), _title string) error {
-	return exec.Command("rundll32", "url.dll,FileProtocolHandler", panelURL).Start()
+func startDesktop(_panelURL string, _stopGateway func(), _title string) error {
+	return errors.New("该构建未包含桌面壳（-tags server），不提供面板入口；请使用正式桌面 exe")
 }

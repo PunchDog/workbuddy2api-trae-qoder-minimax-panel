@@ -45,6 +45,51 @@
       </div>
     </div>
 
+    <!-- Trae / Qoder 积分构成：旧版 loadPkIdea 的等价迁移。与 WorkBuddy 卡并列，
+         单卡失败只标 error 不影响其它；Qoder 逐号查额度（国内/国际分区）。 -->
+    <div v-if="ideaLoading || ideaCards.length" class="wb-card" style="margin-top: 12px">
+      <div class="wb-card-title">
+        IDE 账号积分构成（Trae · Qoder）
+        <TButton size="small" variant="outline" :loading="ideaLoading" @click="loadIdea">刷新</TButton>
+      </div>
+      <div v-if="ideaLoading && !ideaCards.length" class="wb-placeholder">查询中…</div>
+      <div v-else class="pk-idea-grid">
+        <div v-for="card in ideaCards" :key="card.key" class="pk-idea-card">
+          <div class="pk-idea-head">
+            <span class="pk-idea-name">{{ card.name }}</span>
+            <span class="pk-idea-chip">{{ card.platform }}</span>
+            <span v-if="card.realmChip" class="pk-idea-chip pk-idea-realm">{{ card.realmChip }}</span>
+          </div>
+          <div v-if="card.sub" class="pk-idea-sub">{{ card.sub }}</div>
+          <template v-if="card.error">
+            <div class="pk-idea-err">{{ card.error }}</div>
+          </template>
+          <template v-else>
+            <div class="wb-card-value">{{ fmtCredit(card.remain) }}</div>
+            <div class="wb-view-note">共 {{ fmtCredit(card.total) }} · 已用 {{ fmtCredit(card.used) }}</div>
+            <div class="pk-bars" style="margin-top: 8px">
+              <div
+                v-for="(seg, i) in card.segments"
+                :key="i"
+                class="pk-seg"
+                :style="{ flex: String(Math.max(0.5, seg.remain) || 0.5), background: seg.color }"
+                :title="seg.label + (seg.count > 1 ? ' x' + seg.count : '') + ' 剩余 ' + fmtCredit(seg.remain) + (seg.expiryText ? ' · 到期 ' + seg.expiryText : '')"
+              />
+            </div>
+            <div class="pk-idea-legend">
+              <span v-for="(seg, i) in card.segments" :key="i">
+                <i :style="{ background: seg.color }" />
+                {{ seg.label }}<template v-if="seg.count > 1"> x{{ seg.count }}</template>
+                · {{ fmtCredit(seg.remain) }}<template v-if="seg.expiryText"> · {{ seg.expiryText }}</template>
+              </span>
+            </div>
+            <div v-if="card.note" class="pk-idea-note">{{ card.note }}</div>
+          </template>
+        </div>
+      </div>
+      <div v-if="!ideaCards.length" class="wb-view-note">暂无 Trae / Qoder 账号积分数据。</div>
+    </div>
+
     <div class="wb-card" style="margin-top: 12px">
       <div class="wb-card-title">账号对比明细（逐包，最早到期优先）</div>
       <DataTable :columns="detailColumns" :rows="detailRows" empty-text="暂无积分包明细" />
@@ -55,15 +100,18 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { Button as TButton } from 'tdesign-vue-next'
-import { api } from '@/api/client'
-import type { PackagesResponse } from '@/api/types'
+import { api, withQuery } from '@/api/client'
+import type {
+  IdeAccountsResponse, PackagesResponse, TraeCreditsResponse, QoderUsageResult,
+} from '@/api/types'
 import { usePanelStore } from '@/stores/panel'
 import KpiCard from '@/components/KpiCard.vue'
 import DataTable from '@/components/DataTable.vue'
 import { fmtCredit } from '@/utils/format'
 import {
   expBatches, expDaysLeft, pkAccountColorMap, pkAccountSegments, pkDetailGroups,
-  summarizeCreditDays, type PackAccount,
+  qoderCreditCards, summarizeCreditDays, traeCreditCards,
+  type IdeaCreditCard, type PackAccount,
 } from '@/utils/packages'
 
 /** 积分构成：平台积分包 + 到期分布 + 账号对比明细（PRD R-03）。 */
@@ -71,6 +119,8 @@ const panel = usePanelStore()
 const data = ref<PackagesResponse | null>(null)
 const loading = ref(false)
 const detailLimit = ref(5)
+const ideaLoading = ref(false)
+const ideaCards = ref<IdeaCreditCard[]>([])
 
 const accounts = computed<PackAccount[]>(() => (data.value?.accounts || []) as PackAccount[])
 const accountCount = computed(() => accounts.value.length)
@@ -137,7 +187,38 @@ async function load(force = false): Promise<void> {
   }
 }
 
-onMounted(load)
+/**
+ * Trae / Qoder 积分卡：与 WorkBuddy 积分包并行拉取，单一上游失败只降级该账号。
+ * Qoder 逐号查额度（国内/国际分区），账号列表来自 ide/qoder/accounts。
+ */
+async function loadIdea(): Promise<void> {
+  ideaLoading.value = true
+  try {
+    const [tr, qa] = await Promise.allSettled([
+      api<TraeCreditsResponse>('trae/credits'),
+      api<IdeAccountsResponse>('ide/qoder/accounts'),
+    ])
+    const cards: IdeaCreditCard[] = []
+    if (tr.status === 'fulfilled') {
+      cards.push(...traeCreditCards(tr.value.accounts || []))
+    }
+    if (qa.status === 'fulfilled') {
+      const qAccounts = qa.value.accounts || []
+      const usages = await Promise.all(qAccounts.map((a) =>
+        api<QoderUsageResult>(withQuery('ide/qoder/usage', { email: String(a.email || '') }))
+          .catch(() => null as QoderUsageResult | null)))
+      cards.push(...qoderCreditCards(qAccounts, usages))
+    }
+    ideaCards.value = cards
+  } finally {
+    ideaLoading.value = false
+  }
+}
+
+onMounted(() => {
+  void load()
+  void loadIdea()
+})
 </script>
 
 <style scoped>
@@ -149,4 +230,17 @@ onMounted(load)
 .pk-expiry-when { color: var(--ink); min-width: 90px; }
 .pk-expiry-credits { color: var(--accent); font-variant-numeric: var(--wb-tabular); }
 .pk-expiry-note { color: var(--ink-3); flex: 1; }
+/* IDE 平台积分卡（Trae / Qoder） */
+.pk-idea-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+.pk-idea-card { padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--wb-radius); min-width: 0; }
+.pk-idea-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pk-idea-name { font-weight: 600; color: var(--ink); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pk-idea-chip { font-size: 10.5px; padding: 1px 6px; border-radius: 10px; background: var(--accent); color: var(--surface); }
+.pk-idea-realm { background: var(--surface); color: var(--ink-2); border: 1px solid var(--line); }
+.pk-idea-sub { font-size: 11.5px; color: var(--ink-3); margin-top: 4px; overflow-wrap: anywhere; }
+.pk-idea-err { color: var(--warn); font-size: 12px; margin-top: 8px; }
+.pk-idea-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 8px; font-size: 11px; color: var(--ink-2); }
+.pk-idea-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.pk-idea-legend i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+.pk-idea-note { margin-top: 8px; font-size: 11.5px; color: var(--ink-3); }
 </style>

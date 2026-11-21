@@ -8,16 +8,10 @@
     </div>
 
     <div class="wb-kpi-grid">
-      <KpiCard label="Tokens" :value="fmtTok(totals.total_tokens)" :sub="'提示 ' + fmtTok(totals.prompt_tokens) + ' · 补全 ' + fmtTok(totals.completion_tokens)" tone="accent" />
-      <KpiCard label="成本估算" :value="fmtCredit(totals.credits)" sub="积分为观测，非货币成本 · 估算参照" tone="warn" />
-      <KpiCard label="缓存命中" :value="hitRate" :sub="'命中 ' + fmtTok(totals.cache_hit_tokens || 0)" tone="ok" />
-      <KpiCard label="请求数" :value="String(totals.requests)" :sub="'错误 ' + totals.errors" :tone="totals.errors ? 'warn' : 'ok'" />
-    </div>
-
-    <div class="wb-chart-grid">
-      <TrendChart :range="statsRange" />
-      <HeatmapChart />
-      <BreakdownChart :range="statsRange" />
+      <KpiCard label="Tokens" :value="fmtTok(totals.total_tokens)" :sub="'网关口径 · 提示 ' + fmtTok(totals.prompt_tokens) + ' · 补全 ' + fmtTok(totals.completion_tokens)" tone="accent" />
+      <KpiCard label="成本估算" :value="fmtCredit(totals.credits)" sub="网关口径 · 积分为观测，非货币成本" tone="warn" />
+      <KpiCard label="缓存命中" :value="hitRate" :sub="'网关口径 · 命中 ' + fmtTok(totals.cache_hit_tokens || 0)" tone="ok" />
+      <KpiCard label="请求数" :value="String(totals.requests)" :sub="'网关口径 · 错误 ' + totals.errors" :tone="totals.errors ? 'warn' : 'ok'" />
     </div>
 
     <div class="wb-card-grid">
@@ -62,13 +56,35 @@
 
     <div class="wb-card" style="margin-top: 12px">
       <div class="wb-card-title">
-        用量明细 · 按维度
+        官方用量明细 · 近 {{ official?.window_hours || 72 }}h
+        <select v-model="officialDim" class="wb-inline-select">
+          <option value="account">账号</option>
+          <option value="model">模型</option>
+          <option value="day">按日</option>
+        </select>
+      </div>
+      <div class="wb-view-note">
+        上游逐请求统计（WorkBuddy 客户端直连也算），与下方「网关用量」口径不同。
+      </div>
+      <DataTable
+        v-if="official?.ok"
+        :columns="officialColumns"
+        :rows="officialRows"
+        :empty-text="officialEmptyText"
+      />
+      <div v-else class="wb-view-note">官方用量暂不可用（上游未返回数据，不影响网关统计）</div>
+    </div>
+
+    <div class="wb-card" style="margin-top: 12px">
+      <div class="wb-card-title">
+        网关用量明细 · 按维度
         <select v-model="dimension" class="wb-inline-select" @change="renderRows">
           <option value="by_account">账号</option>
           <option value="by_model">模型</option>
           <option value="by_realm">域</option>
         </select>
       </div>
+      <div class="wb-view-note">只统计经本网关（:7863）转发的请求；客户端直连官方不进这张表。</div>
       <DataTable :columns="detailColumns" :rows="detailRows" />
     </div>
 
@@ -84,7 +100,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { Button as TButton, Tooltip as TTooltip } from 'tdesign-vue-next'
 import { api, withQuery } from '@/api/client'
 import { statsRangeFromState, type StatsRange } from '@/api/stats'
@@ -98,12 +114,7 @@ import TimeRangeSwitch from '@/components/TimeRangeSwitch.vue'
 import { cacheRateText, fmtCredit, fmtTok, fmtCreditRatio } from '@/utils/format'
 import { trangeQuery, defaultTrangeState, type TrangeState } from '@/utils/timeRangeLegacy'
 
-/** 图表库体积较大，按需加载：只在进入用量视图时拉取 echarts 独立 chunk。 */
-const TrendChart = defineAsyncComponent(() => import('@/components/charts/TrendChart.vue'))
-const HeatmapChart = defineAsyncComponent(() => import('@/components/charts/HeatmapChart.vue'))
-const BreakdownChart = defineAsyncComponent(() => import('@/components/charts/BreakdownChart.vue'))
-
-/** 用量：6 维时间切换 + KPI + 三图 + 分组卡 + 明细表 + 积分扣除（PRD R-03 / T07）。 */
+/** 用量：6 维时间切换 + KPI + 分组卡 + 明细表 + 积分扣除（PRD R-03 / T07）。 */
 const panel = usePanelStore()
 const data = ref<UsageResponse | null>(null)
 const official = ref<OfficialUsageResponse | null>(null)
@@ -151,6 +162,50 @@ const detailColumns = [
   { key: 'requests', title: '请求', numeric: true },
   { key: 'credits', title: 'Credit', numeric: true, format: (v: unknown) => fmtCredit(v) },
 ]
+
+/** 官方用量明细维度：账号 / 模型 / 按日（数据来自上游 usage 接口，非网关）。 */
+const officialDim = ref<'account' | 'model' | 'day'>('account')
+type TableCol = { key: string; title: string; numeric?: boolean; format?: (v: unknown, row: Record<string, unknown>) => string }
+const officialColumns = computed<TableCol[]>(() => {
+  if (officialDim.value === 'account') {
+    return [
+      { key: 'name', title: '账号' },
+      { key: 'realm', title: '域' },
+      { key: 'requests', title: '请求', numeric: true },
+      { key: 'credits', title: '积分', numeric: true, format: (v: unknown) => fmtCredit(v) },
+    ]
+  }
+  if (officialDim.value === 'model') {
+    return [
+      { key: 'model', title: '模型' },
+      { key: 'requests', title: '请求', numeric: true },
+      { key: 'credits', title: '积分', numeric: true, format: (v: unknown) => fmtCredit(v) },
+    ]
+  }
+  return [
+    { key: 't', title: '日期' },
+    { key: 'requests', title: '请求', numeric: true },
+    { key: 'credits', title: '积分', numeric: true, format: (v: unknown) => fmtCredit(v) },
+  ]
+})
+const officialRows = computed<Array<Record<string, unknown>>>(() => {
+  const o = official.value
+  if (!o || !o.ok) return []
+  if (officialDim.value === 'account') {
+    return (o.by_account || []).map((a) => ({
+      name: a.nickname || a.uid || '—',
+      realm: a.realm || '',
+      requests: a.requests || 0,
+      credits: a.credits || 0,
+    }))
+  }
+  if (officialDim.value === 'model') {
+    return (o.by_model || []).map((m) => ({ model: m.model || '', requests: m.requests || 0, credits: m.credits || 0 }))
+  }
+  return (o.series || []).map((d) => ({ t: d.t || '', requests: d.requests || 0, credits: d.credits || 0 }))
+})
+const officialEmptyText = computed(() =>
+  officialDim.value === 'account' ? '近窗口内无官方用量记录' : officialDim.value === 'model' ? '上游未返回模型维度' : '上游未返回按日序列')
 const detailRows = computed<Array<Record<string, unknown>>>(() => {
   const list = ((data.value as unknown as Record<string, KeyedAgg[]> | null)?.[dimension.value] || [])
   return list.map((r) => ({ ...r })) as Array<Record<string, unknown>>
@@ -202,11 +257,23 @@ function clock(v?: string): string {
 }
 
 /** 三个专项端点与主 usage 并行拉取；单个失败只降级该分组，不拖垮整页（QA D4）。 */
+/** 官方用量窗口小时数：优先 hours；「今天/自定义」只给 from/to 时按差值折算。 */
+function officialHours(): number {
+  const r = statsRange.value
+  if (r.hours && r.hours > 0) return r.hours
+  if (r.from && r.to) {
+    const diff = (Number(r.to) - Number(r.from)) / 3600
+    if (Number.isFinite(diff) && diff > 0) return Math.max(1, Math.round(diff))
+  }
+  return 72
+}
+
+/** 三个专项端点与主 usage 并行拉取；单个失败只降级该分组，不拖垮整页（QA D4）。 */
 async function load(): Promise<void> {
   loading.value = true
   panel.beginLoad()
   try {
-    const hours = String(statsRange.value.hours || 72)
+    const hours = String(officialHours())
     const [main, off, oc, tr] = await Promise.allSettled([
       api<UsageResponse>(statetoQuery()),
       api<OfficialUsageResponse>(withQuery('usage/official', { hours })),

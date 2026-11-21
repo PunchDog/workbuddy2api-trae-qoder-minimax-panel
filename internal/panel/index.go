@@ -1,7 +1,7 @@
 // index.go 面板页面与安全响应头。
 //
 // 页面骨架来自 frontend/dist/index.html（Vite 产物，经 frontend.IndexHTML() 读取
-// go:embed 的嵌入文件系统）；样式与脚本由同源 /panel/assets/* 提供（见 assets.go）。
+// 自 go:embed 的嵌入文件系统）；样式与脚本由同源 /panel/assets/* 提供（见 assets.go）。
 //
 // 安全头对"面板页面与全部 /panel/api/* 响应"统一生效：CSP 限制脚本只能来自本服务，
 // 禁止被 iframe 嵌套（防点击劫持），禁 MIME 嗅探，并声明不泄露 Referer 出去。
@@ -9,8 +9,10 @@ package panel
 
 import (
 	"crypto/sha256"
+	"crypto/subtle"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/linguo2625469/workbuddy2api-panel/frontend"
 )
@@ -54,11 +56,51 @@ func setSecurityHeaders(w http.ResponseWriter) {
 	w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
 }
 
-// index 输出 Vite 面板页面（静态无秘密；数据接口 /panel/api/* 才走鉴权）。
+// panelTokenCookie 门禁通过后的会话 Cookie：让同源 <script src> 与 HEAD 探测
+// 自动携带凭据（静态资源标签无法附加自定义请求头）。
+const panelTokenCookie = "wb2api_panel_token"
+
+// checkPanelToken 校验面板页面门禁。
+//   - AccessToken 为空 = 不启用门禁（单测/本地调试），直接放行；
+//   - 否则 query ?token= 或 Cookie 必须与配置一致；query 通过时写 Cookie，
+//     后续 assets/HEAD 请求无需重复拼 token。
+func (p *Panel) checkPanelToken(w http.ResponseWriter, r *http.Request) bool {
+	want := strings.TrimSpace(p.cfg.AccessToken)
+	if want == "" {
+		return true
+	}
+	got := strings.TrimSpace(r.URL.Query().Get("token"))
+	fromQuery := got != ""
+	if !fromQuery {
+		if c, err := r.Cookie(panelTokenCookie); err == nil {
+			got = strings.TrimSpace(c.Value)
+		}
+	}
+	if subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
+		return false
+	}
+	if fromQuery {
+		http.SetCookie(w, &http.Cookie{
+			Name:     panelTokenCookie,
+			Value:    want,
+			Path:     "/panel/",
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+		})
+	}
+	return true
+}
+
+// index 输出 Vite 面板页面（数据接口 /panel/api/* 另走 api_key 鉴权）。
 // 面板是嵌入式本地服务：升级二进制后必须立刻拿到新 HTML/JS，故 no-cache +
 // ETag 回源校验；资源名自带内容哈希，更新后浏览器必然换 URL。
 func (p *Panel) index(w http.ResponseWriter, r *http.Request) {
 	setSecurityHeaders(w)
+	if !p.checkPanelToken(w, r) {
+		w.Header().Set("Cache-Control", "no-store")
+		writeErr(w, http.StatusForbidden, "panel access denied: missing or invalid token")
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	if indexErr != nil || len(indexHTML) == 0 {

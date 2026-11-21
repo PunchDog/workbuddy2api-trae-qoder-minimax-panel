@@ -40,7 +40,7 @@ tasks:
       - go run -trimpath -tags production ./cmd/app
 
   build:server:
-    desc: 无头网关（Linux/CI/Docker，CGO_ENABLED=0）
+    desc: 无头网关（Linux/CI，CGO_ENABLED=0）
     env:
       GOOS: linux
       CGO_ENABLED: '0'

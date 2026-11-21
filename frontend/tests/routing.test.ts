@@ -1,7 +1,7 @@
 /*
  * routing.test.ts —— 迁移 Go 结构性守卫到 Vitest：
  * TestIndexHTMLNoInlineScript（CSP）、TestPanelIndexExpiryBoxNotHidden、
- * TestFrontendRepairContractAnchors，并锁定 8 hash 路由与 7 类弹窗接线。
+ * TestFrontendRepairContractAnchors，并锁定 7 导航项（+packages 别名）与 7 类弹窗接线。
  * 图表相关 TestAppJSUsageChartBarClass / ChartTooltipInsideBar 属 T07，本批次不接图表。
  */
 import fs from 'node:fs'
@@ -14,42 +14,58 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const srcDir = path.resolve(here, '../src')
 const readSrc = (rel: string): string => fs.readFileSync(path.resolve(srcDir, rel), 'utf8')
 
-describe('8 个 hash 路由（默认 #checkin）', () => {
-  it('导航项齐全且顺序固定', () => {
+describe('7 导航项（默认 #checkin，packages 为合并页别名）', () => {
+  it('导航项齐全且顺序固定（签到池+积分构成已合并）', () => {
     expect(NAV_ITEMS.map((i) => i.key)).toEqual([
-      'checkin', 'usage', 'packages', 'taskscenter', 'ideaccounts', 'models', 'config', 'logs',
+      'checkin', 'usage', 'taskscenter', 'ideaccounts', 'models', 'config', 'logs',
     ])
   })
 
-  it('未知 hash 回落到 checkin', () => {
+  it('未知 hash 回落到 checkin；#packages 仍解析为合并页别名', () => {
     for (const key of NAV_ITEMS) {
       expect(viewFromHash('#' + key.key)).toBe(key.key)
     }
+    expect(viewFromHash('#packages')).toBe('packages')
     expect(viewFromHash('')).toBe('checkin')
     expect(viewFromHash('#nosuch')).toBe('checkin')
     expect(viewFromHash('#/usage?x=1')).toBe('usage')
   })
 
-  it('App.vue 接入全部 8 个真实视图，无 PlaceholderView', () => {
+  it('App.vue 接入全部视图，checkin/packages 同指合并容器，无 PlaceholderView', () => {
     const app = readSrc('App.vue')
     for (const [key, comp] of Object.entries(VIEW_COMPONENTS)) {
       expect(app, `路由 ${key} 未接入 ${comp}`).toContain(`${key}: ${comp}`)
     }
     expect(app).not.toContain('PlaceholderView')
+    expect(app).toContain('CheckinPackagesView')
   })
 })
 
 /** 视图键 → 组件名（与 App.vue 的 VIEW_COMPONENTS 一一对应）。 */
 const VIEW_COMPONENTS: Record<string, string> = {
-  checkin: 'CheckinView',
+  checkin: 'CheckinPackagesView',
+  packages: 'CheckinPackagesView',
   usage: 'UsageView',
-  packages: 'PackagesView',
   taskscenter: 'TasksCenterView',
   ideaccounts: 'IdeAccountsView',
   models: 'ModelsView',
   config: 'ConfigView',
   logs: 'LogsView',
 }
+
+describe('签到池 + 积分构合同页', () => {
+  it('合并容器接入两个子视图并提供 tab 切换', () => {
+    const cp = readSrc('views/CheckinPackagesView.vue')
+    expect(cp).toContain('CheckinView')
+    expect(cp).toContain('PackagesView')
+    expect(cp).toContain('签到池')
+    expect(cp).toContain('积分构成')
+    expect(cp).toContain('KeepAlive')
+    // 两个子视图仍保留原有标题，合并只加 tab 壳，不改子视图内部。
+    expect(readSrc('views/CheckinView.vue')).toContain('签到池')
+    expect(readSrc('views/PackagesView.vue')).toContain('积分构成')
+  })
+})
 
 describe('7 类弹窗接线', () => {
   it('7 个弹窗组件都存在且在 App/视图中接线', () => {
