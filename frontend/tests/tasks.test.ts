@@ -3,16 +3,25 @@
  * AutoSummaryStatuses / QueueRowVerifiedProgress 到 Vitest。
  */
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import {
   autoCounts,
   autoSummaryText,
+  GO_TASK_TITLES,
   groupItems,
   normalizeAutoStatus,
   qrowHTML,
+  qrowView,
   scanErrors,
   scanHasError,
+  taskTitle,
   type AutoResult,
 } from '../src/utils/tasks'
+
+/** D14 守卫：码表直接对照 Go autoActions 静态表，杜绝臆造任务码。 */
+const GO_AUTOTASK = readFileSync(resolve(__dirname, '../../internal/panel/autotask.go'), 'utf8')
+const GO_CODES = new Set([...GO_AUTOTASK.matchAll(/TaskCode:\s*"([^"]+)"/g)].map((m) => m[1]))
 
 describe('任务中心扫描错误（TestFrontendTaskCenterScanError）', () => {
   it('scan_ok=false 汇总错误，且被判定为错误态', () => {
@@ -117,6 +126,38 @@ describe('队列行（TestFrontendQueueRowVerifiedProgress）', () => {
   })
 })
 
+describe('队列行结构化视图（qrowView，QA D7 去 v-html）', () => {
+  it('与 qrowHTML 同口径：未证实 / 进度变化 / 动作提示均为纯文本', () => {
+    const v = qrowView({
+      status: 'partial', code: 'chat_5', progress_before: '3/5', progress_after: '4/5',
+      verified: false, action: 'auto',
+    })
+    expect(v.stWord).toBe('部分完成')
+    expect(v.prog).toBe('3/5 → 4/5')
+    expect(v.tags).toContain('未证实')
+    expect(v.tags).toContain('可自动执行')
+    expect(v.dotCls).toBe('wait')
+    expect(v.msg).toBe('')
+  })
+
+  it('locked 解锁时间与 manual 文案归入 tags/msg', () => {
+    const locked = qrowView({ status: 'locked', code: 'x', unlock: '2026-11-22' })
+    expect(locked.tags).toContain('2026-11-22 解锁')
+    const manual = qrowView({ status: 'manual', code: 'x' })
+    expect(manual.tags).toContain('需手动')
+    expect(manual.msg).toContain('需真实操作')
+  })
+
+  it('上游原文保留给 Vue 插值转义，纯函数不拼 HTML', () => {
+    const raw = '<img src=x onerror=alert(1)>'
+    const v = qrowView({ status: raw, code: 'x', message: '<script>bad()</script>' })
+    expect(v.stWord).toBe(raw)
+    expect(v.msg).toBe('<script>bad()</script>')
+    expect(JSON.stringify(v)).not.toContain('<div')
+    expect(JSON.stringify(v)).not.toContain('class=')
+  })
+})
+
 describe('扫描结果分组（groupItems）', () => {
   it('growth / growth_locked / manual 三类收敛为行，标题回填', () => {
     const titles: Record<string, string> = {}
@@ -133,5 +174,37 @@ describe('扫描结果分组（groupItems）', () => {
     expect(groups[0].rows.map((r) => r.status)).toEqual(['scan', 'locked', 'manual'])
     expect(titles.c1).toBe('聊天')
     expect(groups[0].upstreamTotal).toBe(10)
+  })
+})
+
+describe('D14 任务码中文映射', () => {
+  it('码表与 Go autoActions 双向对齐，无臆造码、无遗漏码', () => {
+    expect(GO_CODES.size).toBeGreaterThan(20)
+    for (const code of Object.keys(GO_TASK_TITLES)) {
+      expect(GO_CODES.has(code), '前端映射了 Go 不存在的码：' + code).toBe(true)
+    }
+    for (const code of GO_CODES) {
+      expect(GO_TASK_TITLES[code], 'Go 码缺少中文映射：' + code).toBeTruthy()
+    }
+  })
+
+  it('上游 title 优先；无 title 回落 Go 说明；未知码保留原样并标注', () => {
+    expect(taskTitle('chat_5', '今日聊天')).toBe('今日聊天')
+    expect(taskTitle('chat_5')).toContain('上报 5 条对话活跃事件')
+    expect(taskTitle('no_such_code')).toBe('no_such_code（未映射）')
+  })
+
+  it('动态 expert_use_ 码走 Go autoActionFor 的通用动作说明', () => {
+    expect(taskTitle('expert_use_maidehao')).toContain('召唤指定专家')
+    expect(taskTitle('WorkBuddy_Valorant')).toContain('召唤指定专家')
+  })
+
+  it('groupItems 在扫描未下发 title 时也回填 Go 说明，队列码不再裸露', () => {
+    const titles: Record<string, string> = {}
+    const groups = groupItems({
+      accounts: [{ uid: 'u1', growth: [{ task_code: 'chat_5', current: 1, target: 5 }] }],
+    }, titles)
+    expect(titles.chat_5).toContain('上报 5 条对话活跃事件')
+    expect(groups[0].rows[0].code).toBe('chat_5')
   })
 })

@@ -28,6 +28,21 @@
   --wb-kpi-rail: 3px;
   --wb-radius: 6px;
   --wb-font-size: 14px;
+  --wb-on-accent: #ffffff;
+
+  /* 分类序列色（D8）：账号/平台色卡从此处读取，packages.ts 的同值数组仅作无 DOM 时的 fallback。 */
+  --wb-series-1: #4f8cff;
+  --wb-series-2: #25b08b;
+  --wb-series-3: #e8a33d;
+  --wb-series-4: #c96bd6;
+  --wb-series-5: #e2607a;
+  --wb-series-6: #20a4a4;
+  --wb-series-7: #8fbf3f;
+  --wb-series-8: #d4785c;
+  --wb-series-9: #7c83db;
+  --wb-series-10: #c48a2f;
+  --wb-series-11: #b45f8c;
+  --wb-series-12: #5aa9e6;
 
   /* tdesign 语义映射（由 ConfigProvider 的 CSS 变量消费） */
   --td-brand-color: var(--accent);

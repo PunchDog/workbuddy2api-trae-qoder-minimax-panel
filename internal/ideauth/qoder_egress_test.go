@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/linguo2625469/workbuddy2api-panel/internal/upstream"
 )
 
 // useTempEgressFile 把出口配置指向临时目录，避免污染真实 data/ide_accounts。
@@ -215,9 +217,13 @@ func TestSetQoderEgressValidation(t *testing.T) {
 	}
 }
 
-// 验收③：client 三态 —— 空走默认 transport，http(s) 走 ProxyURL，socks5 报错。
+// 验收③：client 三态 —— 空走全局代理兜底（关闭即直连），http(s) 走 ProxyURL，socks5 报错。
 func TestQoderDeviceNewHTTPClient(t *testing.T) {
-	// 空 ProxyURL：与 http.DefaultTransport 克隆一致（Proxy 函数相同）。
+	t.Cleanup(func() { _ = upstream.ConfigureProxy(false, "") })
+	if err := upstream.ConfigureProxy(false, ""); err != nil {
+		t.Fatalf("ConfigureProxy: %v", err)
+	}
+	// 空 ProxyURL + 全局关闭：强制直连，不受进程 HTTP_PROXY 影响。
 	c, err := (&QoderDevice{}).NewHTTPClient(5 * time.Second)
 	if err != nil {
 		t.Fatalf("空 ProxyURL 不应报错: %v", err)
@@ -229,12 +235,12 @@ func TestQoderDeviceNewHTTPClient(t *testing.T) {
 	if !ok {
 		t.Fatalf("Transport 类型 = %T，期望 *http.Transport", c.Transport)
 	}
-	def, ok := http.DefaultTransport.(*http.Transport)
-	if !ok {
-		t.Skip("http.DefaultTransport 不是 *http.Transport")
+	if tr.Proxy == nil {
+		t.Fatal("Qoder Transport 应保留可动态读快照的 Proxy 函数")
 	}
-	if reflect.ValueOf(tr.Proxy).Pointer() != reflect.ValueOf(def.Proxy).Pointer() {
-		t.Error("空 ProxyURL 必须保留默认 transport 的代理函数")
+	req, _ := http.NewRequest(http.MethodGet, "https://openapi.qoder.sh/sash/api/v1/me/campaigns", nil)
+	if got, err := tr.Proxy(req); err != nil || got != nil {
+		t.Errorf("全局代理关闭时应直连: url=%v err=%v", got, err)
 	}
 
 	// http 代理：Proxy 返回配置的地址（不再受环境变量影响）。

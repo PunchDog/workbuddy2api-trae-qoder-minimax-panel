@@ -43,6 +43,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/linguo2625469/workbuddy2api-panel/internal/upstream"
 )
 
 const (
@@ -185,7 +187,7 @@ const (
 // devicePost 发一次表单请求（OAuth 端点都是 x-www-form-urlencoded，不是 JSON）。
 func devicePost(ctx context.Context, c *http.Client, fullURL string, form url.Values) ([]byte, int, error) {
 	if c == nil {
-		c = &http.Client{Timeout: deviceHTTPTimeout}
+		c = &http.Client{Timeout: deviceHTTPTimeout, Transport: upstream.ProxyTransport()}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, strings.NewReader(form.Encode()))
 	if err != nil {

@@ -2,68 +2,53 @@
   <div class="wb-view">
     <div class="wb-view-head">
       <h2 class="wb-view-title">签到池</h2>
-      <span class="wb-view-note">账号健康 · 签到状态 · 额度水位</span>
+      <span class="wb-view-note">WorkBuddy · Trae · Qoder · MiniMax · 豆包 五号池统一视图</span>
       <span class="wb-titlebar-spacer" />
       <TButton theme="primary" size="small" :loading="checking" @click="checkinAll">全部签到</TButton>
       <TButton size="small" variant="outline" :loading="batching === 'keepalive_all'" @click="batch('keepalive_all')">保活全部</TButton>
       <TButton size="small" variant="outline" :loading="batching === 'travel_all'" @click="batch('travel_all')">旅行巡检</TButton>
       <TButton size="small" variant="outline" :loading="batching === 'activity_all'" @click="batch('activity_all')">活跃上报</TButton>
       <TButton size="small" variant="outline" :loading="batching === 'balance_all'" @click="batch('balance_all')">刷新余额</TButton>
-      <TButton size="small" variant="outline" @click="addOpen = true">添加账号</TButton>
+      <TButton size="small" variant="outline" @click="addOpen = true">+ 添加账号</TButton>
     </div>
 
     <div v-if="batching" class="wb-view-note ck-batch-note">{{ BATCH_TEXT[batching] }}已开始，结果见运行日志。</div>
     <div v-if="notice" class="wb-view-note ck-batch-note" role="status">{{ notice }}</div>
 
     <div class="wb-kpi-grid">
-      <KpiCard label="今日签到" :value="todayCount" :sub="'/ ' + total + ' 个账号'" tone="ok" />
-      <KpiCard label="账号健康" :value="healthy + ' / ' + total" :sub="overview?.cooling ? overview.cooling + ' 冷却' : '运行正常'" :tone="healthy === total ? 'ok' : 'warn'" />
-      <KpiCard label="额度水位" :value="fmtCredit(totalCredits)" sub="积分观测 · 估算参照" tone="accent" />
-      <KpiCard label="待办异常" :value="String(errorCount)" :sub="errorCount ? '点击查看日志' : '无异常'" :tone="errorCount ? 'bad' : 'ok'" />
+      <KpiCard label="今日签到" :value="todayCount" :sub="platforms.length + ' 平台合计'" tone="ok" />
+      <KpiCard label="账号健康" :value="healthy + ' / ' + total" :sub="'健康 ' + healthy + ' / 共 ' + total" :tone="healthy === total ? 'ok' : 'warn'" />
+      <KpiCard label="额度水位" :value="fmtCredit(totalCredits)" sub="wbPoolAccounts 口径" tone="accent" />
+      <KpiCard label="待办异常" :value="String(errorCount)" :sub="errorCount ? '需人工处理' : '无异常'" :tone="errorCount ? 'bad' : 'ok'" />
     </div>
 
-    <!-- 订阅配额与用量汇总：四卡并行拉取，单卡失败只降级自己（Promise.allSettled）。 -->
-    <div class="wb-special-grid">
-      <div class="wb-card">
-        <div class="wb-card-title">OpenCode 订阅配额</div>
-        <template v-if="opencode?.ok && opencode.windows?.length">
-          <div v-for="(w, i) in opencode.windows" :key="w.key || i" class="ck-special-row">
-            <span>{{ w.label || w.key || '配额' }}</span>
-            <b>{{ pct(w.percent) }}</b>
-            <small v-if="w.reset_at">重置 {{ clock(w.reset_at) }}</small>
-          </div>
-        </template>
-        <div v-else class="wb-view-note">{{ opencode?.error || '暂无 OpenCode 配额数据（未配置 key 时属正常）' }}</div>
-      </div>
+    <!-- 订阅配额与用量汇总：共用 OpenCode/官方两卡，第三卡（网关汇总）由插槽提供。 -->
+    <QuotaSummaryCards :opencode="opencode" :official="official">
+      <template #third>
+        <div class="wb-card">
+          <div class="wb-card-title">网关用量汇总（近 {{ usageHours }}h）</div>
+          <template v-if="gateway?.totals">
+            <div class="wb-special-row"><span>Tokens</span><b>{{ fmtTok(gateway.totals.total_tokens) }}</b></div>
+            <div class="wb-special-row"><span>成本估算</span><b>{{ fmtCredit(gateway.totals.credits) }}</b></div>
+            <div class="wb-special-row"><span>缓存命中</span><b>{{ gatewayHitRate }}</b></div>
+            <div class="wb-special-row"><span>请求数</span><b>{{ gateway.totals.requests }}</b><small>错误 {{ gateway.totals.errors }}</small></div>
+          </template>
+          <div v-else class="wb-view-note">网关用量暂不可用</div>
+        </div>
+      </template>
+    </QuotaSummaryCards>
 
-      <div class="wb-card">
-        <div class="wb-card-title">官方用量（近 {{ official?.window_hours || 72 }}h）</div>
-        <template v-if="official?.ok">
-          <div class="ck-special-row"><span>请求</span><b>{{ fmtTok(official.totals?.requests || 0) }}</b></div>
-          <div class="ck-special-row"><span>积分</span><b>{{ fmtCredit(official.totals?.credits || 0) }}</b></div>
-          <div class="wb-view-note">账号 {{ official.totals?.accounts || 0 }} · 活跃 {{ official.totals?.active || 0 }} · 活跃天 {{ official.totals?.active_days || 0 }}</div>
-          <div v-if="official.errors?.length" class="wb-view-note">{{ official.errors.length }} 个账号拉取失败，详见运行日志</div>
-        </template>
-        <div v-else class="wb-view-note">官方用量暂不可用（上游未返回数据不影响网关用量）</div>
-      </div>
-
-      <div class="wb-card">
-        <div class="wb-card-title">网关用量汇总（近 {{ usageHours }}h）</div>
-        <template v-if="gateway?.totals">
-          <div class="ck-special-row"><span>Tokens</span><b>{{ fmtTok(gateway.totals.total_tokens) }}</b></div>
-          <div class="ck-special-row"><span>成本估算</span><b>{{ fmtCredit(gateway.totals.credits) }}</b></div>
-          <div class="ck-special-row"><span>缓存命中</span><b>{{ gatewayHitRate }}</b></div>
-          <div class="ck-special-row"><span>请求数</span><b>{{ gateway.totals.requests }}</b><small>错误 {{ gateway.totals.errors }}</small></div>
-        </template>
-        <div v-else class="wb-view-note">网关用量暂不可用</div>
-      </div>
-    </div>
-
-    <div v-if="qoderSummary" class="wb-card qd-buckets" v-html="qoderSummary" />
-
-    <div v-if="qoderStatusNote" class="wb-card ck-qd-status">
-      <div class="wb-card-title">Qoder 号池签到状态</div>
-      <div class="wb-view-note">{{ qoderStatusNote }}</div>
+    <div v-if="qoderSummary || qoderStatusNote" class="wb-card qd-buckets">
+      <template v-if="qoderSummary">
+        <div class="note">本次尝试 {{ qoderSummary.attempts }} 个 · {{ qoderSummary.summary }}</div>
+        <div class="qd-tag-row">
+          <StatusTag v-for="tag in qdPhaseTags" :key="tag.key" :text="tag.text" :tone="tag.tone" />
+        </div>
+        <div v-if="qoderSummary.gain" class="note" data-qd-gain="1">{{ qoderSummary.gain }}</div>
+        <div v-if="qoderSummary.groups" class="note" data-qd-groups="1">{{ qoderSummary.groups }}</div>
+        <div v-if="qoderSummary.rotation" class="note" data-qd-rotation="1">{{ qoderSummary.rotation }}</div>
+      </template>
+      <div v-if="qoderStatusNote" class="note">Qoder 签到状态：{{ qoderStatusNote }}</div>
     </div>
 
     <div class="wb-card-grid">
@@ -90,15 +75,16 @@
       <div class="ck-table-wrap">
         <table class="wb-table">
           <thead>
-            <tr><th>账号</th><th>平台</th><th class="num">积分</th><th>状态</th><th>操作</th></tr>
+            <tr><th>平台</th><th>账号</th><th>状态</th><th class="num">积分</th><th>今日签到</th><th>操作</th></tr>
           </thead>
           <tbody>
             <!-- WorkBuddy 主池：完整逐号运维 -->
             <tr v-for="(a, i) in accounts" :key="String(a.uid || i)">
-              <td class="ck-id">{{ identLabel(String(a.nickname || a.uid || ''), '未命名') }}</td>
               <td>{{ a.realm || 'WorkBuddy' }}</td>
-              <td class="num">{{ fmtCredit(a.credits) }}</td>
+              <td class="ck-id">{{ identLabel(String(a.nickname || a.uid || ''), '未命名') }}</td>
               <td>{{ statusText(a) }}</td>
+              <td class="num">{{ fmtCredit(a.credits) }}</td>
+              <td>{{ checkedText(a) }}</td>
               <td>
                 <div class="ck-actions">
                   <button type="button" :disabled="!!busyUid" @click="accountAction(a, 'checkin')">签到</button>
@@ -113,13 +99,14 @@
             </tr>
             <!-- Qoder 独立号池：只读，积分来自 ide/qoder/usage?email= -->
             <tr v-for="(qa, j) in qoderAccountRows" :key="'qoder:' + String(qa.email || j)">
-              <td class="ck-id">{{ identLabel(String(qa.name || qa.email || ''), '未命名') }}</td>
               <td>Qoder · {{ qa.realm === 'cn' ? '国内版' : '国际版' }}</td>
-              <td class="num">{{ qa.creditText }}</td>
+              <td class="ck-id">{{ identLabel(String(qa.name || qa.email || ''), '未命名') }}</td>
               <td>{{ qa.statusText }}</td>
+              <td class="num">{{ qa.creditText }}</td>
+              <td>—</td>
               <td><span class="wb-view-note">独立号池 · 只读</span></td>
             </tr>
-            <tr v-if="!accounts.length && !qoderAccountRows.length"><td colspan="5" class="ck-empty">暂无账号</td></tr>
+            <tr v-if="!accounts.length && !qoderAccountRows.length"><td colspan="6" class="ck-empty">暂无账号</td></tr>
           </tbody>
         </table>
       </div>
@@ -145,11 +132,16 @@ import type {
   UsageResponse,
 } from '@/api/types'
 import { usePanelStore } from '@/stores/panel'
+import { fetchPlatformAccounts } from '@/composables/usePlatformAccounts'
+import { ACCOUNT_JOBS } from '@/config/platformSpec'
 import KpiCard from '@/components/KpiCard.vue'
 import PlatformCard from '@/components/PlatformCard.vue'
+import StatusTag from '@/components/StatusTag.vue'
+import QuotaSummaryCards from '@/components/QuotaSummaryCards.vue'
 import AddAccountDialog from '@/dialogs/AddAccountDialog.vue'
 import { cacheRateText, fmtCredit, fmtTok, identLabel } from '@/utils/format'
-import { qdBucketHTML, type QoderBatch } from '@/utils/qoder'
+import { isWorkBuddyRealm, wbCreditTotal } from '@/utils/credits'
+import { QD_PHASE_ORDER, qdBucketView, qdCounts, qdPhaseText, type QdBucketView, type QoderBatch } from '@/utils/qoder'
 
 /**
  * 签到池：KPI + 订阅配额/用量汇总 + 平台卡 + 一键/批量/逐号运维（PRD R-03/R-05，QA D3）。
@@ -210,15 +202,13 @@ const CHECKIN_JOBS: Array<[string, string]> = [
   ['doubao', 'ide/doubao/checkin'],
 ]
 
+/** 独立号池账号计数作业（Trae/MiniMax/豆包）：路径取自 platformSpec 单一事实表。 */
+const IDE_COUNT_JOBS = ACCOUNT_JOBS.filter(([key]) => key !== 'qoder' && key !== 'workbuddy')
+
 const accounts = computed<AccountStatus[]>(() => overview.value?.accounts || [])
 /** 主池里的 WorkBuddy 账号（realm cn/global，排除带其它平台标识的脏 realm）。 */
-const wbPoolAccounts = computed<AccountStatus[]>(() => {
-  const wbRealms = new Set(['cn', 'global', 'workbuddy', 'wb', 'codebuddy'])
-  return accounts.value.filter((a) => {
-    const r = String(a.realm || '').toLowerCase()
-    return r === '' || wbRealms.has(r)
-  })
-})
+const wbPoolAccounts = computed<AccountStatus[]>(() =>
+  accounts.value.filter((a) => isWorkBuddyRealm(a.realm || '')))
 /**
  * 账号健康口径：主池 WorkBuddy + 各独立号池（Qoder/Trae/MiniMax/豆包）。
  * 只数主池会让「Qoder 登录了两个号」显示 0/0——独立号池不在 overview.accounts 里。
@@ -233,8 +223,23 @@ const healthy = computed(() => {
 })
 const errorCount = computed(() => accounts.value.filter((a) => a.disabled || a.paused).length)
 const todayCount = computed(() => accounts.value.filter((a) => (a as Record<string, unknown>).checked_today).length)
-const totalCredits = computed(() => accounts.value.reduce((s, a) => s + Number(a.credits || 0), 0))
-const qoderSummary = computed(() => (qoder.value ? qdBucketHTML(qoder.value) : ''))
+const totalCredits = computed(() => wbCreditTotal(accounts.value))
+const qoderSummary = computed<QdBucketView | null>(() => (qoder.value ? qdBucketView(qoder.value) : null))
+// 七相分桶标签：只展示真实返回且计数>0 的相位，未入账相位不伪造成已领取。
+const qdPhaseTags = computed(() => {
+  const results = Array.isArray(qoder.value?.results) ? qoder.value!.results! : []
+  const counts = qdCounts(results)
+  return QD_PHASE_ORDER.filter((p) => counts[p] > 0).map((p) => ({
+    key: p,
+    text: qdPhaseText(p) + ' ' + counts[p],
+    tone: p === 'claimed' || p === 'already' ? 'ok'
+      : p === 'failed' || p === 'error' ? 'bad' : 'warn',
+  }))
+})
+// 今日签到列：主池账号用上游 checked_today，缺失时显示「—」而非猜测。
+function checkedText(a: AccountStatus): string {
+  return (a as Record<string, unknown>).checked_today ? '✓' : '—'
+}
 
 /** 单个 Qoder 账号的剩余积分（套餐内 + 附加/签到）；phase!=ok 时为 null，绝不误报 0。 */
 function qoderRemaining(u: QoderUsageResult | null): number | null {
@@ -341,36 +346,24 @@ function statusText(a: AccountStatus): string {
 }
 
 /** 百分比格式化：上游偶尔回字符串，统一走 Number 兜底成「—」。 */
-function pct(v: unknown): string {
-  const n = Number(v)
-  return Number.isFinite(n) ? n.toFixed(1) + '%' : '—'
-}
-
-/** 时间格式化：ISO-8601 → 本地时间，非法值原样展示便于排错。 */
-function clock(v?: string): string {
-  if (!v) return '—'
-  const d = new Date(v)
-  return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleString('zh-CN', { hour12: false })
-}
-
 async function load(): Promise<void> {
   panel.beginLoad()
   try {
-    const [ov, qs, tr, mm, db] = await Promise.allSettled([
+    const [ov, qs, pools] = await Promise.allSettled([
       api<OverviewResponse>('overview'),
       api<QoderCheckinStatusResponse>('ide/qoder/checkin-status'),
-      api<IdeAccountsResponse>('ide/trae/accounts'),
-      api<IdeAccountsResponse>('ide/minimax/accounts'),
-      api<IdeAccountsResponse>('ide/doubao/accounts'),
+      fetchPlatformAccounts(IDE_COUNT_JOBS),
     ])
     if (ov.status === 'fulfilled') overview.value = ov.value
     else panel.setError((ov.reason as Error).message)
     if (qs.status === 'fulfilled') qoderStatus.value = qs.value
     // 独立号池账号数：单端点失败按 0（不计入错误提示，避免运维噪音）。
+    const poolCounts = new Map((pools.status === 'fulfilled' ? pools.value : [])
+      .map((r) => [r.platform, r.accounts.length]))
     ideCounts.value = {
-      trae: tr.status === 'fulfilled' ? (tr.value.accounts || []).length : 0,
-      minimax: mm.status === 'fulfilled' ? (mm.value.accounts || []).length : 0,
-      doubao: db.status === 'fulfilled' ? (db.value.accounts || []).length : 0,
+      trae: poolCounts.get('trae') || 0,
+      minimax: poolCounts.get('minimax') || 0,
+      doubao: poolCounts.get('doubao') || 0,
     }
     // Qoder 账号明细与积分：账号列表已在 load 的并发里拿不到，这里单独拉 accounts
     // 再逐号查 usage；单号失败记 null（额度卡显示「需登录/额度未取到」，不伪造 0）。
@@ -508,13 +501,9 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .qd-buckets { margin-bottom: 12px; }
-/* 配额四卡与用量页同款网格/行样式（CSS 变量已在全局主题里）。 */
-.wb-special-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-bottom: 12px; }
-.ck-special-row { display: flex; gap: 10px; align-items: baseline; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 12.5px; }
-.ck-special-row b { font-variant-numeric: var(--wb-tabular); }
-.ck-special-row small { color: var(--ink-3); }
+.qd-buckets .note { padding: 6px 0; }
+.qd-tag-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0 8px; }
 .ck-batch-note { margin-bottom: 8px; color: var(--accent); }
-.ck-qd-status { margin-bottom: 12px; }
 .ck-table-note { margin-bottom: 6px; }
 .ck-table-wrap { overflow: auto; max-height: 420px; }
 .ck-id { color: var(--accent); font-family: ui-monospace, monospace; }

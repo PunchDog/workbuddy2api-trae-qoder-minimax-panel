@@ -2,7 +2,7 @@
   <div class="wb-view">
     <div class="wb-view-head">
       <h2 class="wb-view-title">配置</h2>
-      <span class="wb-view-note">分区设置 · 字段与 CFG_MAP 一一对应 · 覆盖型字段留空即清空</span>
+      <span class="wb-view-note">字段与后端 CFG_MAP 一一对应 · spec 外置</span>
       <span class="wb-titlebar-spacer" />
       <TButton size="small" variant="outline" :loading="loading" @click="load">重新载入</TButton>
       <TButton size="small" theme="primary" :loading="saving" :disabled="hasBadDuration" @click="save">保存</TButton>
@@ -66,6 +66,7 @@
           </label>
         </div>
       </div>
+      <div class="cfg-warn">⚠ 时长格式校验：保存前检查，非法时禁用保存；敏感字段「留空即清空」；代理配置需重启生效</div>
       <div class="wb-view-note cfg-foot">
         标记「需重启」的项保存后需重启服务生效；其余项热生效。Upstash Redis 镜像、凭证目录、归档保留天数等需手工编辑配置文件。
       </div>
@@ -97,128 +98,10 @@ import {
 
 /**
  * 配置页：分区设置卡 + 控件字段与 CFG_MAP 一一对应（PRD R-03 / C-UI-REPAIR@1）。
- * 控件类型由下方 spec 决定，而 spec 的 name 集合严格等于 CFG_MAP 的键集合——
+ * 字段 spec 外置到 config/configSpec.ts（D9），视图只遍历 SECTIONS 渲染；
  * 保存统一走 utils/config.collectConfig，回填走 fillConfig，时长校验走 durationBad。
  */
-type ControlType = 'text' | 'number' | 'checkbox' | 'select'
-
-interface FieldSpec {
-  name: string
-  label: string
-  type: ControlType
-  hint?: string
-  placeholder?: string
-  password?: boolean
-  restart?: boolean
-  wide?: boolean
-  options?: Array<{ label: string; value: string }>
-}
-
-interface SectionSpec {
-  title: string
-  desc: string
-  fields: FieldSpec[]
-}
-
-const PROMPT_OPTIONS: Array<{ label: string; value: string }> = [
-  { label: 'custom — 网关自有提示词（避免指纹误报）', value: 'custom' },
-  { label: 'append — 客户端 system 后插网关提示词（并用）', value: 'append' },
-  { label: 'passthrough — 透传客户端原始 system', value: 'passthrough' },
-]
-
-const sections: SectionSpec[] = [
-  {
-    title: '服务',
-    desc: '监听地址、访问密钥与面板明细上限',
-    fields: [
-      { name: 'listen', label: '监听地址', type: 'text', placeholder: ':7863', restart: true },
-      { name: 'api_key', label: '访问密钥', type: 'text', password: true, placeholder: '留空 = 自动生成 sk- 密钥', hint: '留空并保存即清空，下次启动自动生成' },
-      { name: 'package_detail_limit', label: '积分明细展示数', type: 'number', hint: '默认 5' },
-    ],
-  },
-  {
-    title: '定时任务',
-    desc: '签到与积分任务的启用开关、执行时刻与并发 inclusion',
-    fields: [
-      { name: 'checkin_enabled', label: '每日签到', type: 'checkbox' },
-      { name: 'checkin_hours', label: '签到时刻', type: 'text', placeholder: '9, 21' },
-      { name: 'keepalive_enabled', label: '保活签到', type: 'checkbox' },
-      { name: 'keepalive_hours', label: '保活时刻', type: 'text', placeholder: '22' },
-      { name: 'travel_enabled', label: '旅行任务', type: 'checkbox' },
-      { name: 'travel_hours', label: '旅行时刻', type: 'text', placeholder: '9, 21' },
-      { name: 'activity_enabled', label: '活动任务', type: 'checkbox' },
-      { name: 'activity_hours', label: '活动时刻', type: 'text', placeholder: '10' },
-      { name: 'balance_refresh_enabled', label: '余额刷新', type: 'checkbox' },
-      { name: 'balance_refresh_minutes', label: '刷新间隔（分钟）', type: 'number' },
-      { name: 'growth_enabled', label: '成长任务', type: 'checkbox' },
-      { name: 'growth_hours', label: '成长任务时刻', type: 'text', placeholder: '1' },
-      { name: 'include_disabled_in_tasks', label: '任务包含禁用账号', type: 'checkbox' },
-    ],
-  },
-  {
-    title: 'Trae 签到',
-    desc: 'Trae 平台签到开关与自动签到时刻；留空保存下发空数组',
-    fields: [
-      { name: 'trae_enabled', label: '启用 Trae 签到', type: 'checkbox' },
-      { name: 'trae_auto_hours', label: '自动签到时刻', type: 'text', placeholder: '9, 21', hint: '留空 = 仅手动按钮，关闭自动签到' },
-    ],
-  },
-  {
-    title: '账号池与流量治理',
-    desc: '并发、熔断、降级、冷却与到期优先策略；时长字段按 Go 语法校验',
-    fields: [
-      { name: 'max_in_flight', label: '单账号并发上限', type: 'number' },
-      { name: 'max_in_flight_global', label: '全局并发上限', type: 'number' },
-      { name: 'breaker_threshold', label: '熔断阈值', type: 'number' },
-      { name: 'soft_rate', label: '软限流时长', type: 'text', placeholder: '600s' },
-      { name: 'soft_rate_max', label: '软限流上限', type: 'text', placeholder: '2h' },
-      { name: 'breaker_cooldown', label: '熔断冷却', type: 'text', placeholder: '30m' },
-      { name: 'breaker_cooldown_max', label: '熔断冷却上限', type: 'text', placeholder: '6h' },
-      { name: 'degrade_threshold', label: '降级阈值', type: 'number' },
-      { name: 'degrade_cooldown', label: '降级冷却', type: 'text', placeholder: '10m' },
-      { name: 'degrade_cooldown_max', label: '降级冷却上限', type: 'text', placeholder: '2h' },
-      { name: 'idle_weight_per_hour', label: '空闲权重/小时', type: 'number' },
-      { name: 'idle_weight_max', label: '空闲权重上限', type: 'number' },
-      { name: 'cost_explore_interval', label: '成本探测间隔', type: 'text', placeholder: '30m' },
-      { name: 'credit_floor', label: '积分下限', type: 'number' },
-      { name: 'expiring_soon', label: '即将到期阈值', type: 'text', placeholder: '168h' },
-      { name: 'ttl', label: '会话粘性 TTL', type: 'text', placeholder: '30m' },
-      { name: 'prefer_expiring', label: '优先使用即将到期积分', type: 'checkbox' },
-    ],
-  },
-  {
-    title: '上游与高级',
-    desc: '超时、系统提示词与指纹脱敏；提示词相关项需重启',
-    fields: [
-      { name: 'timeout_seconds', label: '请求超时（秒）', type: 'number' },
-      { name: 'header_timeout_seconds', label: '响应头超时（秒）', type: 'number' },
-      { name: 'idle_timeout_seconds', label: '空闲超时（秒）', type: 'number' },
-      { name: 'user_agent', label: '出站 User-Agent', type: 'text', placeholder: '留空 = CLI/2.63.2 CodeBuddy/2.63.2', hint: '留空保存 = 清空覆盖', wide: true },
-      { name: 'prompt_mode', label: '系统提示词模式', type: 'select', options: PROMPT_OPTIONS, restart: true },
-      { name: 'prompt_file', label: '提示词文件路径', type: 'text', placeholder: '留空 = 内置默认提示词', hint: '留空保存 = 清空覆盖', wide: true },
-      { name: 'sanitize_blacklist_fingerprints', label: '出站请求指纹脱敏', type: 'checkbox' },
-      { name: 'session_sticky_enabled', label: '会话粘性路由', type: 'checkbox' },
-    ],
-  },
-  {
-    title: '日志',
-    desc: '调用来源记录，热生效',
-    fields: [
-      { name: 'request_client_info', label: '记录调用来源（客户端 IP / User-Agent）', type: 'checkbox', wide: true, hint: '关闭后归档与面板都不再出现来源信息' },
-    ],
-  },
-  {
-    title: 'OpenCode 查询',
-    desc: '订阅配额查询用上游 Key，热生效',
-    fields: [
-      { name: 'opencode_api_key', label: 'OpenCode API Key', type: 'text', password: true, placeholder: '留空 = 沿用客户端 Key / 环境变量', hint: '留空保存 = 清空覆盖', wide: true },
-    ],
-  },
-]
-
-/** 控件类型权威表：fillConfig 只按值推断类型，这里补齐"空值字段"的正确控件类型。 */
-const CHECKBOX_FIELDS = new Set(sections.flatMap((s) => s.fields).filter((f) => f.type === 'checkbox').map((f) => f.name))
-const NUMBER_FIELDS = new Set(sections.flatMap((s) => s.fields).filter((f) => f.type === 'number').map((f) => f.name))
+import { CHECKBOX_FIELDS, NUMBER_FIELDS, SECTIONS as sections } from '@/config/configSpec'
 
 const panel = usePanelStore()
 const fields = reactive<ConfigFields>(fillConfig({}))
@@ -310,6 +193,7 @@ onMounted(load)
 .cfg-bad { color: var(--bad); font-size: 11px; }
 .cfg-num { width: 100%; }
 .cfg-eye { position: absolute; right: 0; top: 0; }
+.cfg-warn { padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent); background: color-mix(in srgb, var(--warn) 8%, transparent); color: var(--warn); font-size: 12px; border-radius: var(--wb-radius); }
 .cfg-foot { padding: 4px 2px 12px; line-height: 1.7; }
 .cfg-field :deep(.invalid input) { border-color: var(--bad) !important; }
 </style>

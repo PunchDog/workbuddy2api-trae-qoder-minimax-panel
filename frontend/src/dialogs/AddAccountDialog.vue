@@ -122,7 +122,20 @@ import { api, apiUpload, withQuery } from '@/api/client'
 defineProps<{ visible: boolean }>()
 const emit = defineEmits<{ 'update:visible': [value: boolean]; added: [] }>()
 
-type ApiResult = Record<string, any>
+/** 登录流程 start/poll/add_extract 等端点的响应信封。 */
+interface ApiResult {
+  ok?: boolean
+  error?: string
+  message?: string
+  msg?: string
+  note?: string
+  added?: boolean
+  pending?: boolean
+  imported?: number
+  skipped?: number
+  account?: { nickname?: string; uid?: string; [key: string]: unknown }
+  [key: string]: unknown
+}
 const tab = ref('workbuddy')
 const busy = ref(false)
 const status = ref('')
@@ -255,7 +268,7 @@ async function workbuddyPoll(state: string): Promise<string> {
       status.value = '等待浏览器完成授权…'
       continue
     }
-    const acc = (r?.account || {}) as ApiResult
+    const acc = r?.account || {}
     return (r?.added ? '已添加 WorkBuddy 账号：' : '已更新 WorkBuddy 账号：') +
       String(acc.nickname || acc.uid || '完成')
   }

@@ -9,6 +9,7 @@ import {
   pkAccountColorMap,
   pkDetailGroups,
   pkDetailLimit,
+  seriesColor,
   sortByExpiry,
   sortByExpirySnapshot,
   summarizeCreditDays,
@@ -43,6 +44,15 @@ describe('明细分组（TestAppJSDetailGroups）', () => {
   it('明细展示数默认 5，可配置', () => {
     expect(pkDetailLimit({})).toBe(5)
     expect(pkDetailLimit({ panel: { package_detail_limit: 7 } })).toBe(7)
+  })
+})
+
+describe('序列色 fallback（F6 色值归一）', () => {
+  it('无 DOM 时沿用 tokens.css --wb-series-N 的同值 fallback，按索引循环', () => {
+    expect(seriesColor(0)).toBe('#4f8cff')
+    expect(seriesColor(1)).toBe('#25b08b')
+    expect(seriesColor(12)).toBe(seriesColor(0))
+    expect(seriesColor(-1)).toBe(seriesColor(11))
   })
 })
 

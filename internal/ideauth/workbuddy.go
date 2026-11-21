@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/linguo2625469/workbuddy2api-panel/internal/upstream"
 )
 
 // ---------------------------------------------------------------------------
@@ -144,7 +146,7 @@ type WorkBuddyAccountView struct {
 // ---------------------------------------------------------------------------
 
 func wbHTTPClient() *http.Client {
-	return &http.Client{Timeout: 30 * time.Second}
+	return &http.Client{Timeout: 30 * time.Second, Transport: upstream.ProxyTransport()}
 }
 
 // wbNoAuthHeaders 构造“匿名”请求头（auth/state 与 auth/token 用）。

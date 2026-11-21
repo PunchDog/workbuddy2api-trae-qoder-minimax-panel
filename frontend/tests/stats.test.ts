@@ -28,6 +28,16 @@ import {
 import { statsParams, statsRangeFromState } from '../src/api/stats'
 import type { TrangeState } from '../src/utils/timeRangeLegacy'
 
+/** J7 后 statsCharts 只保留纯函数，测试用最小 option 结构断言映射口径。 */
+interface ChartOpt {
+  xAxis?: { data?: unknown[]; name?: string }
+  yAxis?: { data?: unknown[]; name?: string }
+  series?: Array<{ type?: string; data?: unknown[]; areaStyle?: { color?: unknown } }>
+  animation?: boolean
+  visualMap?: { max?: number }
+  [key: string]: unknown
+}
+
 const apiMock = vi.fn(async (path: string) => path)
 vi.mock('../src/api/client', () => ({
   api: (path: string) => apiMock(path),
@@ -95,7 +105,7 @@ describe('T07 时间参数映射', () => {
 
 describe('T07 折线图映射与数据透明', () => {
   it('label/value 顺序一一对应，series 为 line 且关闭动画', () => {
-    const opt = trendOption([point('01-01 09时', 10), point('01-01 10时', 20)], 'tokens', DARK_PALETTE) as Record<string, any>
+    const opt = trendOption([point('01-01 09时', 10), point('01-01 10时', 20)], 'tokens', DARK_PALETTE) as ChartOpt
     expect(opt.xAxis.data).toEqual(['01-01 09时', '01-01 10时'])
     expect(opt.series[0].type).toBe('line')
     expect(opt.series[0].data).toEqual([10, 20])
@@ -105,7 +115,7 @@ describe('T07 折线图映射与数据透明', () => {
 
   it('credits 指标的 y 轴单位为 credit，渐变对象原样透传', () => {
     const gradient = { __linearGradient: true }
-    const opt = trendOption([point('t', 3, 0)], 'credits', DARK_PALETTE, gradient) as Record<string, any>
+    const opt = trendOption([point('t', 3, 0)], 'credits', DARK_PALETTE, gradient) as ChartOpt
     expect(opt.yAxis.name).toBe('credit')
     expect(opt.series[0].areaStyle.color).toBe(gradient)
   })
@@ -129,7 +139,7 @@ describe('T07 折线图映射与数据透明', () => {
   it('2160 点映射为单次遍历，不卡顿且长度守恒', () => {
     const points = Array.from({ length: 2160 }, (_v, i) => point('t' + i, i))
     const start = performance.now()
-    const opt = trendOption(points, 'tokens', DARK_PALETTE) as Record<string, any>
+    const opt = trendOption(points, 'tokens', DARK_PALETTE) as ChartOpt
     const elapsed = performance.now() - start
     expect(opt.series[0].data.length).toBe(2160)
     expect(elapsed).toBeLessThan(500)
@@ -142,7 +152,7 @@ describe('T07 热力图映射与 90 天降级', () => {
     expect(HEATMAP_LABELS[0]).toBe('周一')
     const opt = heatmapOption([{
       weekday: 1, hour: 0, value: 5, requests: 2, samples: 2, days: 3,
-    }], 10, DARK_PALETTE) as Record<string, any>
+    }], 10, DARK_PALETTE) as ChartOpt
     expect(opt.series[0].data.length).toBe(168)
     expect(opt.series[0].data[0]).toEqual([0, 0, 5])
     expect(opt.series[0].data[1]).toEqual([1, 0, 0])
@@ -167,7 +177,7 @@ describe('T07 热力图映射与 90 天降级', () => {
   })
 
   it('max=0 时 visualMap 兜底为 1，避免除零', () => {
-    const opt = heatmapOption([], 0, DARK_PALETTE) as Record<string, any>
+    const opt = heatmapOption([], 0, DARK_PALETTE) as ChartOpt
     expect(opt.visualMap.max).toBe(1)
   })
 })
@@ -175,7 +185,7 @@ describe('T07 热力图映射与 90 天降级', () => {
 describe('T07 占比图映射与排除项标注', () => {
   it('保留后端 Top8+其他，不二次截断', () => {
     const items = Array.from({ length: 12 }, (_v, i) => item('k' + i, 12 - i, 0))
-    const opt = breakdownOption(items, 'tokens', DARK_PALETTE) as Record<string, any>
+    const opt = breakdownOption(items, 'tokens', DARK_PALETTE) as ChartOpt
     expect(opt.series[0].data.length).toBe(12)
     expect(opt.series[0].data[0]).toEqual({ name: 'k0', value: 12 })
     expect(opt.series[0].type).toBe('pie')

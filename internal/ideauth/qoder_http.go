@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/linguo2625469/workbuddy2api-panel/internal/upstream"
 )
 
 // 连接层参数（口径对齐 internal/upstream/transport.go 的实测取值）。
@@ -86,6 +88,8 @@ func newQoderTransport() *http.Transport {
 	tr.MaxIdleConnsPerHost = qoderMaxIdleConnsPerHost
 	tr.IdleConnTimeout = qoderIdleConnTimeout
 	tr.ResponseHeaderTimeout = qoderResponseHeaderTimeout
+	// J9：全局代理兜底；qoderTransport 里若设备 ProxyURL 非空会再覆盖，设备级优先。
+	upstream.ApplyGlobalProxy(tr)
 	return tr
 }
 

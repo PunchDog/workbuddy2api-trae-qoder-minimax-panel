@@ -3,7 +3,7 @@
  *
  * 全部走 T03 client.ts（Bearer / 401 / 在途合并 / 超时），端点路径与
  * internal/panel/stats.go 注册完全一致。时间范围复用 T04 的 trangeQuery，
- * 保证图表与用量 KPI 使用同一套时间口径。
+ * 保证统计端点与用量 KPI 使用同一套时间口径。
  */
 import { api, withQuery } from './client'
 import type {
@@ -41,7 +41,7 @@ export function statsRangeFromState(st: TrangeState, nowMs?: number): StatsRange
   return out
 }
 
-/** 时间窗口 → 查询串键值；供图表组件组合各自 metric/dimension 参数。 */
+/** 时间窗口 → 查询串键值；供统计端点组合各自 metric/dimension 参数。 */
 export function statsParams(range: StatsRange): Record<string, string | number> {
   const out: Record<string, string | number> = {}
   if (range.from !== undefined) out.from = range.from

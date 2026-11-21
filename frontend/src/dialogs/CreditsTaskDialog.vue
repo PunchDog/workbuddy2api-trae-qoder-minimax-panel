@@ -8,7 +8,27 @@
     </div>
     <ScanErrorBanner v-if="!quiet" :errors="scanErrors(scanResult)" />
     <div v-if="summary" class="ct-summary">{{ summary }}</div>
-    <div class="ct-list" v-html="rowsHtml" />
+    <div class="ct-list">
+      <div v-for="(g, gi) in rows" :key="g.uid || gi" class="ct-group">
+        <b>{{ g.nick }}</b>
+        <div
+          v-for="(r, ri) in g.rows"
+          :key="r.code + ':' + ri"
+          class="qrow"
+          :title="r.msg"
+          :data-q-status="r.status"
+        >
+          <span class="code">{{ r.code }}</span>
+          <span class="name">
+            <span class="t">{{ r.title }}</span>
+            <span v-for="(tag, ti) in r.tags" :key="ti" class="tag mute">{{ tag }}</span>
+          </span>
+          <span class="prog">{{ r.prog }}</span>
+          <span class="st"><span class="qdot" :class="r.dotCls"></span>{{ r.stWord }}</span>
+          <span class="msg">{{ r.msg }}</span>
+        </div>
+      </div>
+    </div>
   </TDialog>
 </template>
 
@@ -17,8 +37,15 @@ import { computed, ref } from 'vue'
 import { Dialog as TDialog, Button as TButton, InputNumber as TInputNumber } from 'tdesign-vue-next'
 import { api } from '@/api/client'
 import ScanErrorBanner from '@/components/ScanErrorBanner.vue'
-import { esc } from '@/utils/format'
-import { autoSummaryText, groupItems, qrowHTML, scanErrors, scanHasError, type ScanResult } from '@/utils/tasks'
+import {
+  autoSummaryText,
+  groupItems,
+  qrowView,
+  scanErrors,
+  scanHasError,
+  type QrowView,
+  type ScanResult,
+} from '@/utils/tasks'
 
 /** 积分任务弹窗：扫描 / 一键完成 / 状态汇总（现役 taskAutoResult + qrow）。 */
 const props = defineProps<{ visible: boolean }>()
@@ -33,11 +60,13 @@ const titles: Record<string, string> = {}
 
 const quiet = computed<boolean>(() => !scanHasError(scanResult.value))
 const summary = computed<string>(() => scanResult.value.results ? autoSummaryText(scanResult.value as never, secs.value) : '')
-const rowsHtml = computed<string>(() => {
-  const groups = groupItems(scanResult.value, titles)
-  return groups.map((g) => '<div class="ct-group"><b>' + esc(g.nick || g.uid.slice(0, 12)) + '</b>' +
-    g.rows.map((r) => qrowHTML(r as never, titles)).join('') + '</div>').join('')
-})
+/** 扫描结果 → 分组的结构化行；qrowView 与契约函数 qrowHTML 同口径，由 Vue 插值自动转义。 */
+const rows = computed<Array<{ uid: string; nick: string; rows: QrowView[] }>>(() =>
+  groupItems(scanResult.value, titles).map((g) => ({
+    uid: g.uid,
+    nick: g.nick || g.uid.slice(0, 12),
+    rows: g.rows.map((r) => qrowView(r)),
+  })))
 
 async function scan(): Promise<void> {
   scanning.value = true

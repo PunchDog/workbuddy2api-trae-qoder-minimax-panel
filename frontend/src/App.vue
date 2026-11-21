@@ -25,12 +25,9 @@
         <TButton size="small" variant="outline" :title="themeHint" @click="theme.cycle()">
           {{ themeLabel }}
         </TButton>
-        <TButton v-if="!session.hasKey" size="small" theme="primary" @click="session.openKeyDialog()">
-          设置密钥
-        </TButton>
       </header>
 
-      <!-- 左侧导航：7 项（签到池+积分构成已合并为同一页的两个 tab） -->
+      <!-- 左侧导航：8 项独立视图（积分构成独立，无 tab 合并） -->
       <nav class="wb-nav" aria-label="主导航">
         <button
           v-for="item in NAV_ITEMS"
@@ -76,9 +73,10 @@ import { TIME_RANGES, type TimeRangeKey } from '@/composables/useTimeRange'
 import { useTheme, type ThemeMode } from '@/composables/useTheme'
 import { useBuildFingerprint } from '@/composables/useBuildFingerprint'
 
-// 7 个导航视图 + packages（合并页隐藏别名）：默认 #checkin。
-import CheckinPackagesView from '@/views/CheckinPackagesView.vue'
+// 8 个独立导航视图：默认 #checkin。
+import CheckinView from '@/views/CheckinView.vue'
 import UsageView from '@/views/UsageView.vue'
+import PackagesView from '@/views/PackagesView.vue'
 import TasksCenterView from '@/views/TasksCenterView.vue'
 import IdeAccountsView from '@/views/IdeAccountsView.vue'
 import ModelsView from '@/views/ModelsView.vue'
@@ -87,7 +85,7 @@ import LogsView from '@/views/LogsView.vue'
 import ApiKeyDialog from '@/dialogs/ApiKeyDialog.vue'
 import BuildMismatchDialog from '@/dialogs/BuildMismatchDialog.vue'
 
-/** 布局壳 + hash 路由出口 + 全局浮层；checkin / packages 指向同一容器的两个 tab。 */
+/** 布局壳 + hash 路由出口 + 全局浮层；8 个视图各自独立。 */
 const panel = usePanelStore()
 const session = useSessionStore()
 const theme = useTheme()
@@ -96,9 +94,9 @@ const theme = useTheme()
 const globalConfig = {}
 
 const VIEW_COMPONENTS: Record<ViewKey, Component> = {
-  checkin: CheckinPackagesView,
-  packages: CheckinPackagesView,
+  checkin: CheckinView,
   usage: UsageView,
+  packages: PackagesView,
   taskscenter: TasksCenterView,
   ideaccounts: IdeAccountsView,
   models: ModelsView,
@@ -108,9 +106,9 @@ const VIEW_COMPONENTS: Record<ViewKey, Component> = {
 const currentViewComponent = computed<Component>(() => VIEW_COMPONENTS[panel.currentView])
 
 const THEME_LABELS: Record<ThemeMode, string> = {
-  system: '跟随系统',
-  dark: '暗色',
-  light: '亮色',
+  system: '🌐 跟随系统',
+  dark: '🌙 暗色',
+  light: '☀️ 亮色',
 }
 const themeLabel = computed<string>(() => THEME_LABELS[theme.mode.value])
 const themeHint = computed<string>(() => `当前主题：${themeLabel.value}（点击切换）`)
@@ -130,9 +128,9 @@ const {
   stop: stopBuildProbe,
 } = useBuildFingerprint()
 
-/** packages 是合并页的隐藏别名，侧栏「签到池」项保持高亮。 */
+/** 8 项独立导航：当前视图即高亮项。 */
 function isNavActive(key: ViewKey): boolean {
-  return panel.currentView === key || (key === 'checkin' && panel.currentView === 'packages')
+  return panel.currentView === key
 }
 
 function onRefresh(): void {

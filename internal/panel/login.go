@@ -55,7 +55,7 @@ func loginEndpoints(realm string) (state, token, account, origin string) {
 }
 
 // loginHTTP 设备授权专用 client：短超时、无 cookie（每请求携带 state，无会话态）。
-var loginHTTP = &http.Client{Timeout: 30 * time.Second}
+var loginHTTP = &http.Client{Timeout: 30 * time.Second, Transport: upstream.ProxyTransport()}
 
 func commonHeaders(req *http.Request, origin string) {
 	req.Header.Set("Content-Type", "application/json")

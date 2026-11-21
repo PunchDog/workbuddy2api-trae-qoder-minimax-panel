@@ -143,7 +143,7 @@ function usedPaths(): Array<{ file: string; path: string }> {
       }
     }
 
-    const constRe = /const\s+(?:CHECKIN_JOBS|ACCOUNT_JOBS|SUBMIT_PATH)\s*[^=]*=\s*([\s\S]*?)(?=\n\s*(?:const|async function|function|onMounted|watch)\b|$)/g
+    const constRe = /const\s+(?:CHECKIN_JOBS|ACCOUNT_JOBS|SUBMIT_PATH|PLATFORM_SPECS)\s*[^=]*=\s*([\s\S]*?)(?=\n\s*(?:const|async function|function|onMounted|watch|export)\b|$)/g
     let m: RegExpExecArray | null = null
     while ((m = constRe.exec(src)) !== null) {
       const litRe = /['"`]([a-z][a-z0-9_/-]*\/[a-z0-9_/-]+)['"`]/g

@@ -151,6 +151,12 @@ func Run() {
 		}
 	}
 
+	// 出站代理在装配期注入一次：upstream.* 属需重启项，newTransport 与各裸客户端
+	// 统一从此快照取配置，面板保存后须重启才生效（saveConfig 已列重启提示）。
+	if err := upstream.ConfigureProxy(cfg.Upstream.ProxyEnabled, cfg.Upstream.ProxyURL); err != nil {
+		log.Fatalf("config upstream.proxy_url: %v", err)
+	}
+
 	// api_key 未填写 → 自动生成 sk- 密钥并写回 config.json（保留未知键），
 	// 网关与面板调用一律用它鉴权；写回失败（只读挂载等）用内存 key 继续启动。
 	if key, kerr := EnsureAPIKey(cfg, *cfgPath); kerr != nil {
@@ -704,7 +710,8 @@ func restartRequiredFields(c *Config) []string {
 	if c.StateFile != "" {
 		out = append(out, "state_file")
 	}
-	out = append(out, "upstream.timeout_seconds", "upstream.header_timeout_seconds", "upstream.idle_timeout_seconds")
+	out = append(out, "upstream.timeout_seconds", "upstream.header_timeout_seconds", "upstream.idle_timeout_seconds",
+		"upstream.proxy_enabled", "upstream.proxy_url")
 	// upstream.user_agent 在装配期被写进出站 client（main.go 的 up.UserAgent = ...），
 	// 之后不再读取——不在 livecfg 热快照里，也无法热改。此前漏列，导致面板改完
 	// 显示"已保存"却不提示需要重启，用户以为没生效（issue #102 附带发现 2）。

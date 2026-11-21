@@ -16,6 +16,7 @@ import (
 
 	"github.com/linguo2625469/workbuddy2api-panel/internal/prompt"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/server"
+	"github.com/linguo2625469/workbuddy2api-panel/internal/upstream"
 )
 
 // Config 顶层配置。
@@ -163,6 +164,11 @@ type Config struct {
 		DeviceTokenFile string `json:"device_token_file"`
 		// PassthroughIP 是否透传客户端 IP 给上游（默认 false，反代安全边界）。
 		PassthroughIP bool `json:"passthrough_ip"`
+		// ProxyEnabled 出站代理总开关（默认 false，本机无代理软件时全部出站仍可用）。
+		// upstream.* 属需重启项：面板保存后由 saveConfig 提示重启，不假装热生效。
+		ProxyEnabled bool `json:"proxy_enabled"`
+		// ProxyURL HTTP(S) 代理地址；空串在 normalize 回落 upstream.DefaultProxyURL。
+		ProxyURL string `json:"proxy_url"`
 	} `json:"upstream"`
 
 	Features struct {
@@ -364,6 +370,7 @@ func Default() *Config {
 	// HeaderTimeoutSeconds/IdleTimeoutSeconds 默认 0（未设置态），回落见 normalize()。
 	c.Upstream.HeaderTimeoutSeconds = 0
 	c.Upstream.IdleTimeoutSeconds = 0
+	// 代理默认关闭（零值）；ProxyURL 空串在 normalize 回落 upstream.DefaultProxyURL。
 	// Global.Enabled 缺省 true（纯 CN 行为不变：CN 账号恒判 cn，global base 不被使用）；
 	// ChatBase/BillingBase 缺省空（回落内置默认）。
 	c.Global.Enabled = true
@@ -772,6 +779,13 @@ func (c *Config) normalize() error {
 	}
 	if c.Upstream.IdleTimeoutSeconds <= 0 {
 		c.Upstream.IdleTimeoutSeconds = 300
+	}
+	// 代理地址空串回落默认值；非法 URL 在配置加载期 fail-fast，不静默降级成直连。
+	if strings.TrimSpace(c.Upstream.ProxyURL) == "" {
+		c.Upstream.ProxyURL = upstream.DefaultProxyURL
+	}
+	if err := upstream.ValidateProxyURL(c.Upstream.ProxyURL); err != nil {
+		return fmt.Errorf("upstream.proxy_url: %w", err)
 	}
 	if !strings.HasPrefix(c.Listen, ":") && !strings.Contains(c.Listen, ":") {
 		c.Listen = ":" + c.Listen

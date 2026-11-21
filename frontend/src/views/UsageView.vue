@@ -8,58 +8,32 @@
     </div>
 
     <div class="wb-kpi-grid">
-      <KpiCard label="Tokens" :value="fmtTok(totals.total_tokens)" :sub="'网关口径 · 提示 ' + fmtTok(totals.prompt_tokens) + ' · 补全 ' + fmtTok(totals.completion_tokens)" tone="accent" />
-      <KpiCard label="成本估算" :value="fmtCredit(totals.credits)" sub="网关口径 · 积分为观测，非货币成本" tone="warn" />
-      <KpiCard label="缓存命中" :value="hitRate" :sub="'网关口径 · 命中 ' + fmtTok(totals.cache_hit_tokens || 0)" tone="ok" />
-      <KpiCard label="请求数" :value="String(totals.requests)" :sub="'网关口径 · 错误 ' + totals.errors" :tone="totals.errors ? 'warn' : 'ok'" />
+      <KpiCard label="Tokens" :value="fmtTok(totals.total_tokens)" sub="网关口径" tone="accent" />
+      <KpiCard label="成本估算" :value="fmtCredit(totals.credits)" sub="按档位单价 · 积分为观测，非货币成本" tone="warn" />
+      <KpiCard label="缓存命中" :value="hitRate" sub="cache read" tone="ok" />
+      <KpiCard label="请求数" :value="String(totals.requests)" :sub="successRate" :tone="totals.errors ? 'warn' : 'ok'" />
     </div>
 
-    <div class="wb-card-grid">
-      <div v-for="g in groups" :key="g.key" class="wb-card">
-        <div class="wb-card-title">{{ g.label }}</div>
-        <div class="wb-card-value">{{ fmtTok(g.total_tokens) }} <small>tok</small></div>
-        <div class="wb-view-note">{{ g.requests }} 次请求 · {{ fmtCredit(g.credits) }} credit</div>
-      </div>
-    </div>
-
-    <div class="wb-special-grid" style="margin-top: 12px">
-      <div class="wb-card">
-        <div class="wb-card-title">OpenCode 订阅配额</div>
-        <template v-if="opencode?.ok && opencode.windows?.length">
-          <div v-for="(w, i) in opencode.windows" :key="w.key || i" class="us-special-row">
-            <span>{{ w.label || w.key || '配额' }}</span>
-            <b>{{ pct(w.percent) }}</b>
-            <small v-if="w.reset_at">重置 {{ clock(w.reset_at) }}</small>
+    <QuotaSummaryCards :opencode="opencode" :official="official" style="margin-top: 12px" :show-hours="false">
+      <template #third>
+        <div class="wb-card">
+          <div class="wb-card-title">Trae 模型请求限额</div>
+          <div v-for="(a, i) in traeLimits" :key="a.user_id || a.name || i" class="wb-special-row">
+            <span>{{ a.name || a.user_id || ('账号 ' + (i + 1)) }}</span>
+            <b>{{ a.error ? '不可用' : (a.parallel_limit ? '并行 ' + a.parallel_limit : (a.limits?.length || 0) + ' 类') }}</b>
           </div>
-        </template>
-        <div v-else class="wb-view-note">{{ opencode?.error || '暂无 OpenCode 配额数据（未配置 key 时属正常）' }}</div>
-      </div>
-      <div class="wb-card">
-        <div class="wb-card-title">官方用量（近 {{ official?.window_hours || 72 }}h）</div>
-        <template v-if="official?.ok">
-          <div class="us-special-row"><span>请求</span><b>{{ fmtTok(official.totals?.requests || 0) }}</b></div>
-          <div class="us-special-row"><span>积分</span><b>{{ fmtCredit(official.totals?.credits || 0) }}</b></div>
-          <div class="wb-view-note">账号 {{ official.totals?.accounts || 0 }} · 活跃 {{ official.totals?.active || 0 }} · 活跃天 {{ official.totals?.active_days || 0 }}</div>
-          <div v-if="official.errors?.length" class="wb-view-note">{{ official.errors.length }} 个账号拉取失败，详见运行日志</div>
-        </template>
-        <div v-else class="wb-view-note">官方用量暂不可用（上游未返回数据不影响网关用量）</div>
-      </div>
-      <div class="wb-card">
-        <div class="wb-card-title">Trae 模型请求限额</div>
-        <div v-for="(a, i) in traeLimits" :key="a.user_id || a.name || i" class="us-special-row">
-          <span>{{ a.name || a.user_id || ('账号 ' + (i + 1)) }}</span>
-          <b>{{ a.error ? '不可用' : (a.parallel_limit ? '并行 ' + a.parallel_limit : (a.limits?.length || 0) + ' 类') }}</b>
+          <div v-if="!traeLimits.length" class="wb-view-note">暂无 Trae 账号限额数据</div>
         </div>
-        <div v-if="!traeLimits.length" class="wb-view-note">暂无 Trae 账号限额数据</div>
-      </div>
-    </div>
+      </template>
+    </QuotaSummaryCards>
 
     <div class="wb-card" style="margin-top: 12px">
       <div class="wb-card-title">
-        官方用量明细 · 近 {{ official?.window_hours || 72 }}h
+        官方用量明细
+        <span class="wb-view-note"> · 近 {{ official?.window_hours || 72 }}h · 维度：</span>
         <select v-model="officialDim" class="wb-inline-select">
-          <option value="account">账号</option>
-          <option value="model">模型</option>
+          <option value="model">按模型</option>
+          <option value="account">按账号</option>
           <option value="day">按日</option>
         </select>
       </div>
@@ -93,15 +67,18 @@
       <DataTable :columns="creditColumns" :rows="creditRows" />
     </div>
 
-    <TTooltip :content="coverageNote">
-      <span class="wb-view-note">数据覆盖说明 ⓘ</span>
-    </TTooltip>
+    <div class="wb-card" style="margin-top: 12px">
+      <div class="wb-card-title">数据覆盖说明 <span class="wb-view-note">⚠ 透明标注</span></div>
+      <div class="wb-view-note">missing_intervals 为补零，非真实 0；excluded（豆包）与 credit_samples=0 已单独说明，不伪造数据。</div>
+      <div class="wb-view-note">上游逐请求接口未返回输入/输出/缓存 token，本页只展示真实可得的聚合维度。</div>
+      <div class="wb-view-note">{{ coverageNote }}</div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { Button as TButton, Tooltip as TTooltip } from 'tdesign-vue-next'
+import { Button as TButton } from 'tdesign-vue-next'
 import { api, withQuery } from '@/api/client'
 import { statsRangeFromState, type StatsRange } from '@/api/stats'
 import type {
@@ -111,6 +88,7 @@ import { usePanelStore } from '@/stores/panel'
 import KpiCard from '@/components/KpiCard.vue'
 import DataTable from '@/components/DataTable.vue'
 import TimeRangeSwitch from '@/components/TimeRangeSwitch.vue'
+import QuotaSummaryCards from '@/components/QuotaSummaryCards.vue'
 import { cacheRateText, fmtCredit, fmtTok, fmtCreditRatio } from '@/utils/format'
 import { trangeQuery, defaultTrangeState, type TrangeState } from '@/utils/timeRangeLegacy'
 
@@ -129,32 +107,12 @@ const dimension = ref<'by_account' | 'by_model' | 'by_realm'>('by_account')
 const EMPTY_AGG: Agg = { requests: 0, errors: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, credits: 0, credit_samples: 0, credit_tokens: 0, credits_per_1m_tokens: 0, avg_latency_ms: 0, avg_tokens_per_second: 0 }
 const totals = computed<Agg>(() => data.value?.totals || EMPTY_AGG)
 const hitRate = computed(() => cacheRateText(totals.value.cache_hit_tokens, totals.value.cache_miss_tokens))
-
-const groups = computed(() => {
-  const d = data.value
-  const opencode = d?.by_realm?.find((r) => r.key === 'opencode' || String(r.realm).toLowerCase() === 'opencode')
-  return [
-    { key: 'opencode', label: 'OpenCode 订阅配额', ...aggOf(opencode) },
-    { key: 'official', label: '官方用量', ...aggOf((d?.by_realm || []).filter((r) => r.key === 'cn' || r.realm === 'cn')) },
-    { key: 'qoder', label: 'Qoder 直连', ...aggOf((d?.by_realm || []).filter((r) => String(r.key).startsWith('qoder'))) },
-    { key: 'gateway', label: '网关用量', ...aggOf(d?.by_realm || []) },
-  ]
+// 请求数 KPI 的脚注按预览口径显示成功率；无请求时不臆造百分比。
+const successRate = computed(() => {
+  const n = totals.value.requests || 0
+  if (n <= 0) return '成功 —'
+  return '成功 ' + Math.max(0, ((n - (totals.value.errors || 0)) / n) * 100).toFixed(1) + '%'
 })
-
-function aggOf(rows: KeyedAgg | KeyedAgg[] | undefined): Agg {
-  const list = Array.isArray(rows) ? rows : rows ? [rows] : []
-  const out: Agg = { ...EMPTY_AGG }
-  for (const r of list) {
-    out.requests += r.requests || 0
-    out.errors += r.errors || 0
-    out.prompt_tokens += r.prompt_tokens || 0
-    out.completion_tokens += r.completion_tokens || 0
-    out.total_tokens += r.total_tokens || 0
-    out.credits += r.credits || 0
-    out.credit_samples += r.credit_samples || 0
-  }
-  return out
-}
 
 const detailColumns = [
   { key: 'key', title: '名称' },
@@ -164,7 +122,7 @@ const detailColumns = [
 ]
 
 /** 官方用量明细维度：账号 / 模型 / 按日（数据来自上游 usage 接口，非网关）。 */
-const officialDim = ref<'account' | 'model' | 'day'>('account')
+const officialDim = ref<'account' | 'model' | 'day'>('model')
 type TableCol = { key: string; title: string; numeric?: boolean; format?: (v: unknown, row: Record<string, unknown>) => string }
 const officialColumns = computed<TableCol[]>(() => {
   if (officialDim.value === 'account') {
@@ -225,7 +183,7 @@ const coverageNote = computed(() => data.value
   ? `${data.value.buckets} 个数据桶 · ${data.value.window_from || '最早'} → ${data.value.window_to || '现在'} · 生成于 ${data.value.generated}`
   : '暂无数据')
 
-/** 三张图表与 KPI 共用同一时间口径，切换时光标驱动图表重新请求。 */
+/** 官方用量窗口与 KPI 共用同一时间口径；切换维度时由查询串驱动重新请求。 */
 const statsRange = computed<StatsRange>(() => statsRangeFromState({
   preset: preset.value,
   from: toDate(from.value),
@@ -244,16 +202,6 @@ function toDate(v: string): Date | null {
   if (!v) return null
   const d = new Date(v)
   return Number.isNaN(d.getTime()) ? null : d
-}
-
-function pct(v: unknown): string {
-  const n = Number(v)
-  return Number.isFinite(n) ? n.toFixed(1) + '%' : '—'
-}
-function clock(v?: string): string {
-  if (!v) return '—'
-  const d = new Date(v)
-  return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleString('zh-CN', { hour12: false })
 }
 
 /** 三个专项端点与主 usage 并行拉取；单个失败只降级该分组，不拖垮整页（QA D4）。 */
@@ -301,8 +249,4 @@ onMounted(() => {
 <style scoped>
 .wb-inline-select { margin-left: 8px; background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; padding: 2px 6px; }
 .wb-card-value small { font-size: 13px; color: var(--ink-3); font-weight: 400; }
-.wb-special-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
-.us-special-row { display: flex; gap: 10px; align-items: baseline; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 12.5px; }
-.us-special-row b { font-variant-numeric: var(--wb-tabular); }
-.us-special-row small { color: var(--ink-3); }
 </style>

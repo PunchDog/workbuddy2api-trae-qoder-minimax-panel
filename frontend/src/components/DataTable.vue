@@ -42,20 +42,3 @@ function cell(row: Record<string, unknown>, col: { key: string; format?: (v: unk
   return v == null || v === '' ? '—' : String(v)
 }
 </script>
-
-<style scoped>
-.wb-table-wrap { overflow: auto; max-height: 460px; border: 1px solid var(--line); border-radius: var(--wb-radius); }
-.wb-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-.wb-table th {
-  position: sticky; top: 0; z-index: 1;
-  background: var(--surface-2); color: var(--ink-2);
-  text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line);
-  white-space: nowrap; font-weight: 500;
-}
-.wb-table td { padding: 7px 10px; border-bottom: 1px solid var(--line); color: var(--ink); }
-.wb-table td.num, .wb-table th.num { text-align: right; font-variant-numeric: var(--wb-tabular); }
-.wb-table td.clip { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wb-table tbody tr:hover { background: var(--surface-2); }
-.wb-table-empty { padding: 24px; text-align: center; color: var(--ink-3); }
-.wb-table-count { padding: 6px 10px; color: var(--ink-3); font-size: 12px; }
-</style>

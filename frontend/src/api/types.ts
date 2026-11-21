@@ -87,6 +87,10 @@ export interface AccountStatus {
 /** GET /panel/api/logs */
 export interface LogEntry {
   at?: string
+  /** 系统日志行内时间戳（ch/at 之外的原始字段）。 */
+  ts?: string
+  /** 系统日志通道，旧字段 channel 的别名。 */
+  ch?: string
   channel?: string
   text?: string
   [key: string]: unknown
@@ -97,6 +101,19 @@ export interface LogsResponse {
 
 /** GET /panel/api/request_metrics */
 export interface RequestMetricsResponse {
+  completed?: number
+  in_flight?: number
+  success_rate?: number
+  http_success_rate?: number
+  avg_duration_ms?: number
+  archive?: {
+    enabled?: boolean
+    dropped_writes?: number
+    last_error?: string
+    [key: string]: unknown
+  }
+  /** 归档关闭时的内存回落行；具体列由 LogsView 的 RequestRow 解释。 */
+  recent?: Array<Record<string, unknown>>
   [key: string]: unknown
 }
 
@@ -133,7 +150,10 @@ export interface UsageResponse {
 
 /** GET /panel/api/models */
 export interface ModelEntry {
+  /** 对外组合 ID（`工具:模型ID`），请求网关时 model 字段填此值。 */
   id: string
+  /** 工具内原始模型 ID，由后端 panelModelEntry 直接返回。 */
+  raw_id?: string
   name: string
   vendor?: string
   credits?: number
@@ -264,8 +284,32 @@ export interface TraeLimitsResponse {
   accounts: TraeLimitAccount[]
 }
 
-/** GET /panel/api/tasks/queue */
+/** GET /panel/api/tasks/queue 队列行（对齐 Go internal/panel/taskcenter.go queueItem）。 */
+export interface TaskQueueItem {
+  uid: string
+  nickname: string
+  kind: string
+  code: string
+  source?: string
+  status: string
+  action?: string
+  message?: string
+  progress_before?: string
+  progress_after?: string
+  verified: boolean
+  claimed: boolean
+  [key: string]: unknown
+}
+
+/** GET /panel/api/tasks/queue 信封（对齐 Go tasksQueueStatus payload）。 */
 export interface TaskQueueResponse {
+  running?: boolean
+  total?: number
+  conc?: number
+  started?: boolean
+  started_at?: string
+  seq?: number
+  items?: TaskQueueItem[]
   [key: string]: unknown
 }
 

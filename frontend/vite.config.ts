@@ -51,25 +51,6 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
-    rollupOptions: {
-      output: {
-        /**
-         * T07：把 echarts / zrender / vue-echarts 拆成独立 chunk。
-         * 配合 UsageView 的 defineAsyncComponent，主 bundle 不随图表库增长，
-         * 且只在进入用量视图时按需加载 echarts。
-         */
-        manualChunks(id) {
-          if (
-            id.includes('node_modules/echarts/') ||
-            id.includes('node_modules/zrender/') ||
-            id.includes('node_modules/vue-echarts/')
-          ) {
-            return 'echarts'
-          }
-          return undefined
-        },
-      },
-    },
     // 关键：Vite 默认的 modulepreload polyfill 是内联 <script>，
     // 会被现役 script-src 'self' 的严格 CSP 拦截导致白屏，必须关闭。
     modulePreload: {

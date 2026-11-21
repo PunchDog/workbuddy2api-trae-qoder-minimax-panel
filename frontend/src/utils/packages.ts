@@ -31,11 +31,23 @@ export interface PackAccount {
   [key: string]: unknown
 }
 
+/** 无 DOM 环境（单测/SSR）时的 fallback，色值必须与 tokens.css 的 --wb-series-N 逐字一致。 */
 export const PK_ACCOUNT_COLORS = [
   '#4f8cff', '#25b08b', '#e8a33d', '#c96bd6',
   '#e2607a', '#20a4a4', '#8fbf3f', '#d4785c',
   '#7c83db', '#c48a2f', '#b45f8c', '#5aa9e6',
 ]
+
+/** 分类序列色：优先读 tokens.css 令牌，缺失（无 DOM/令牌未注入）才用 fallback。 */
+export function seriesColor(index: number): string {
+  const i = ((index % PK_ACCOUNT_COLORS.length) + PK_ACCOUNT_COLORS.length) % PK_ACCOUNT_COLORS.length
+  if (typeof document !== 'undefined') {
+    const value = getComputedStyle(document.documentElement)
+      .getPropertyValue('--wb-series-' + (i + 1)).trim()
+    if (value) return value
+  }
+  return PK_ACCOUNT_COLORS[i]
+}
 
 /** 无错误账号按 UID 排序后稳定分配颜色。 */
 export function pkAccountColorMap(list: PackAccount[]): Map<string, string> {
@@ -44,7 +56,7 @@ export function pkAccountColorMap(list: PackAccount[]): Map<string, string> {
     .map((a) => String(a.uid))
     .sort()
   const colors = new Map<string, string>()
-  uids.forEach((uid, i) => colors.set(uid, PK_ACCOUNT_COLORS[i % PK_ACCOUNT_COLORS.length]))
+  uids.forEach((uid, i) => colors.set(uid, seriesColor(i)))
   return colors
 }
 
@@ -291,8 +303,6 @@ export interface IdeaCreditCard {
   error?: string
 }
 
-const IDE_COLORS = ['#4f8cff', '#25b08b', '#e8a33d', '#c96bd6', '#e2607a', '#20a4a4']
-
 /** 毫秒到期 → 中文短日期；9999 年或缺失视为不过期。 */
 export function ideaExpiryText(ms: number | undefined | null): string {
   if (!ms || !Number.isFinite(Number(ms)) || Number(ms) <= 0) return '不过期'
@@ -343,7 +353,7 @@ export function traeCreditCards(
     })
     const segments = [...groups.values()]
       .sort((x, y) => y.remain - x.remain)
-      .map((g, i) => ({ ...g, color: IDE_COLORS[i % IDE_COLORS.length] }))
+      .map((g, i) => ({ ...g, color: seriesColor(i) }))
     const timed = packs.filter((p) => Number(p.end_time || 0) > 0)
       .sort((x, y) => Number(x.end_time) - Number(y.end_time))
     const next = timed[0]
@@ -379,8 +389,8 @@ export function qoderCreditCards(
     const pkgUsed = Number(pkg.used || 0), addonUsed = Number(addon.used || 0)
     const pkgTotal = Number(pkg.total || 0), addonTotal = Number(addon.total || 0)
     const segments: IdeaSegment[] = [
-      { label: '套餐内', remain: pkgRemain, total: pkgTotal, count: 1, expiryText: '', color: IDE_COLORS[0] },
-      { label: '附加/签到', remain: addonRemain, total: addonTotal, count: 1, expiryText: '', color: IDE_COLORS[1] },
+      { label: '套餐内', remain: pkgRemain, total: pkgTotal, count: 1, expiryText: '', color: seriesColor(0) },
+      { label: '附加/签到', remain: addonRemain, total: addonTotal, count: 1, expiryText: '', color: seriesColor(1) },
     ]
     const tier = String(u.plan_tier_name || u.plan_tier || '—')
     const expText = '到期：' + ideaExpiryText(u.expires_at_ms)

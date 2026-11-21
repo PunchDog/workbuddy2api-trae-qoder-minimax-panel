@@ -1,12 +1,12 @@
 /*
- * statsCharts.ts —— 三个图表的 option 映射与数据透明文案（纯函数）。
+ * statsCharts.ts —— 统计口径纯函数与数据透明文案。
  *
- * 刻意不 import echarts 运行时：渐变色对象由图表组件用字面量
- * `new graphic.LinearGradient(...)` 构造后传入，保证：
- *  1) 首屏不因纯函数加载图表库；2) 不做任何字符串表达式求值，守住严格 CSP；
- *  3) Vitest 可在 node 环境直接测映射逻辑，无需浏览器 canvas。
+ * J7 方案B 删除三图渲染组件后，本模块不再服务界面渲染；保留 option / tooltip 映射
+ * 纯函数，供 25 项 Go→Vitest 契约的等价断言继续锁定「补零非真实 0 / 无小时数据不参与
+ * 着色 / credit_samples=0 不伪造」口径。刻意不引入 echarts 运行时，不做字符串表达式求值，
+ * 守住严格 CSP，并让 Vitest 在 node 环境可直接测映射逻辑。
  */
-import type { EChartsCoreOption } from 'echarts/core'
+type EChartsCoreOption = Record<string, unknown>
 import type {
   BreakdownItem,
   HeatmapCell,

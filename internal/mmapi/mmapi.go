@@ -26,6 +26,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/linguo2625469/workbuddy2api-panel/internal/upstream"
 )
 
 // DefaultBase 开放平台国内站（国际站为 api.minimax.io/v1，key 不通用）。
@@ -110,7 +112,7 @@ func Load(path string) (*Registry, error) {
 			return
 		}
 		c := &Client{ID: id, Name: name, Base: base, Keys: clean,
-			HTTP: &http.Client{Timeout: 300 * time.Second}}
+			HTTP: &http.Client{Timeout: 300 * time.Second, Transport: upstream.ProxyTransport()}}
 		if c.Name == "" {
 			c.Name = id
 		}

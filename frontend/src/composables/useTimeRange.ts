@@ -4,6 +4,10 @@
  * 产出的 from/to 是 unix 秒（后端 parseTimeParam 同时支持秒/毫秒/RFC3339）；
  * hours 给出区间跨度的小时数供展示，后端在显式 from/to 存在时以区间为准。
  * 所有日期按浏览器本地时区计算，保证「今天」与用户直觉一致。
+ *
+ * 边界（D7）：本模块只服务顶栏 6 键选择器；截至 P3，panel.timeRange 无 API 消费点，
+ * 用量/日志/统计口径一律走 timeRangeLegacy。不得把本模块的 from/to 直接接进统计请求，
+ * 否则会与 7 preset 的 rolling/绝对区间语义冲突。
  */
 import { computed, ref, type Ref } from 'vue'
 

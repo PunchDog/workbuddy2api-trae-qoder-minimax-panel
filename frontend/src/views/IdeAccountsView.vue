@@ -1,8 +1,8 @@
 <template>
   <div class="wb-view">
     <div class="wb-view-head">
-      <h2 class="wb-view-title">IDE 账号池</h2>
-      <span class="wb-view-note">Qoder / Trae / WorkBuddy / MiniMax / 豆包 账号卡 + 筛选</span>
+      <h2 class="wb-view-title">IDE 账号</h2>
+      <span class="wb-view-note">IDE 账号池 · Qoder / Trae / WorkBuddy / MiniMax / 豆包</span>
       <span class="wb-titlebar-spacer" />
       <select v-model="platform" class="wb-inline-select">
         <option value="">全部平台</option>
@@ -14,19 +14,35 @@
       </select>
       <TButton size="small" variant="outline" @click="egressOpen = true">设备/出口</TButton>
       <TButton size="small" variant="outline" @click="historyOpen = true">领取历史</TButton>
-      <TButton size="small" theme="primary" @click="addOpen = true">添加账号</TButton>
+      <TButton size="small" theme="primary" @click="addOpen = true">+ 添加账号</TButton>
     </div>
 
     <div v-if="notice" class="wb-view-note ia-notice" role="status">{{ notice }}</div>
+    <div v-if="failedPlatforms" class="wb-view-note ia-failed">⚠ {{ failedPlatforms }} 个平台账号查询失败 · 部分数据降级展示</div>
 
     <div class="wb-kpi-grid">
-      <KpiCard label="账号总数" :value="String(filtered.length)" sub="当前筛选" tone="accent" />
+      <KpiCard label="账号总数" :value="String(totalCount)" sub="全平台" tone="accent" />
       <KpiCard label="健康" :value="String(healthyCount)" tone="ok" />
       <KpiCard label="禁用 / 暂停" :value="String(disabledCount)" tone="warn" />
       <KpiCard label="积分合计" :value="fmtCredit(creditSum)" sub="估算参照" tone="accent" />
     </div>
 
     <div class="wb-card-grid" style="margin-top: 12px">
+      <div v-for="card in platformCards" :key="card.key" class="wb-card ia-card">
+        <div class="wb-card-title">
+          <b>{{ card.label }}</b>
+          <StatusTag :text="card.chip" :tone="card.tone" />
+        </div>
+        <div class="wb-card-value">{{ card.count }}</div>
+        <div class="ia-actions">
+          <button v-if="card.switchKey" type="button" :disabled="!!busyKey" @click="switchPlatform(card.key)">一键切号</button>
+          <button type="button" class="ia-danger" :disabled="!!busyKey" @click="removePlatform(card.key)">移除</button>
+        </div>
+      </div>
+    </div>
+
+    <h3 class="wb-view-title ia-section">逐账号明细</h3>
+    <div class="wb-card-grid">
       <div v-for="a in filtered" :key="String(a.uid || a.email || a.id)" class="wb-card ia-card">
         <div class="wb-card-title">
           <StatusTag :text="a.disabled ? '禁用' : a.paused ? '暂停' : '正常'" />
@@ -53,6 +69,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { Button as TButton } from 'tdesign-vue-next'
 import { api } from '@/api/client'
+import { fetchPlatformAccounts } from '@/composables/usePlatformAccounts'
 import type { IdeAccount } from '@/api/types'
 import { usePanelStore } from '@/stores/panel'
 import KpiCard from '@/components/KpiCard.vue'
@@ -61,10 +78,13 @@ import AddAccountDialog from '@/dialogs/AddAccountDialog.vue'
 import QoderEgressDialog from '@/dialogs/QoderEgressDialog.vue'
 import QoderHistoryDialog from '@/dialogs/QoderHistoryDialog.vue'
 import { fmtCredit, identLabel } from '@/utils/format'
+import { ACCOUNT_JOBS, PLATFORM_LABEL, PLATFORM_SPECS, REMOVE_KEY, SWITCH_KEY } from '@/config/platformSpec'
 
 /** IDE 账号池：账号卡网格 + 筛选 + 添加/切号/移除/设备/历史（PRD R-03/R-05，QA D3/D5）。 */
 const panel = usePanelStore()
 const notice = ref('')
+// 平台查询失败数：页内显式降级提示，不只塞进顶栏全局错误。
+const failedPlatforms = ref(0)
 const raw = ref<IdeAccount[]>([])
 const platform = ref('')
 const busyKey = ref('')
@@ -72,23 +92,10 @@ const addOpen = ref(false)
 const egressOpen = ref(false)
 const historyOpen = ref(false)
 
-const PLATFORM_LABEL: Record<string, string> = {
-  qoder: 'Qoder', trae: 'Trae', workbuddy: 'WorkBuddy', minimax: 'MiniMax', doubao: '豆包',
-}
-/** 只有三款 IDE 支持「切号并重启客户端」；MiniMax/豆包只有移除。 */
-const SWITCH_KEY: Record<string, string> = { qoder: 'email', trae: 'id', workbuddy: 'uid' }
-const REMOVE_KEY: Record<string, string> = { qoder: 'email', trae: 'id', workbuddy: 'uid', minimax: 'id', doubao: 'id' }
-
 /**
- * 现役没有 `ide/accounts` 聚合端点；app.js 按平台分别拉取并合并。
+ * 平台元数据（标签/切号键/移除键/列表端点）收敛到 config/platformSpec.ts（D13），
+ * 现役没有 ide/accounts 聚合端点，仍按平台分别拉取并合并。
  */
-const ACCOUNT_JOBS: Array<[string, string]> = [
-  ['qoder', 'ide/qoder/accounts'],
-  ['trae', 'ide/trae/accounts'],
-  ['workbuddy', 'ide/workbuddy/accounts'],
-  ['minimax', 'ide/minimax/accounts'],
-  ['doubao', 'ide/doubao/accounts'],
-]
 
 type IdeAccountVm = IdeAccount & { platform?: string }
 
@@ -101,33 +108,53 @@ const filtered = computed<IdeAccountVm[]>(() => {
     String(a.email || a.uid || '').toLowerCase().includes(q),
   )
 })
-const healthyCount = computed(() => filtered.value.filter((a) => !a.disabled && !a.paused).length)
-const disabledCount = computed(() => filtered.value.filter((a) => a.disabled || a.paused).length)
-const creditSum = computed(() => filtered.value.reduce((s, a) => s + Number(a.credits || 0), 0))
+const asVm = (list: IdeAccount[]): IdeAccountVm[] => list as IdeAccountVm[]
+const totalCount = computed(() => raw.value.length)
+const healthyCount = computed(() => asVm(raw.value).filter((a) => !a.disabled && !a.paused).length)
+const disabledCount = computed(() => asVm(raw.value).filter((a) => a.disabled || a.paused).length)
+const creditSum = computed(() => raw.value.reduce((s, a) => s + Number(a.credits || 0), 0))
+// 平台聚合卡：按 platformSpec 单一事实表取数，筛选只作用于下方逐账号明细。
+const platformCards = computed(() => PLATFORM_SPECS.map((spec) => {
+  const list = asVm(raw.value).filter((a) => a.platform === spec.key)
+  const bad = list.some((a) => a.disabled || a.paused)
+  return {
+    key: spec.key,
+    label: spec.label,
+    count: list.length,
+    chip: spec.key === 'doubao' ? 'excluded' : bad ? '部分异常' : '正常',
+    tone: spec.key === 'doubao' || bad ? 'warn' : 'ok',
+    switchKey: SWITCH_KEY[spec.key] || '',
+  }
+}))
 
 function keyOf(a: IdeAccountVm, which: Record<string, string>): string {
   const k = which[a.platform || ''] || 'id'
   return String((a as unknown as Record<string, unknown>)[k] || a.uid || a.email || a.id || '')
 }
+// 平台卡的操作指向该平台首个账号；确认文案由逐号操作给出，避免误删。
+function firstOfPlatform(platformKey: string): IdeAccountVm | undefined {
+  return asVm(raw.value).find((a) => a.platform === platformKey)
+}
+function switchPlatform(platformKey: string): void {
+  const a = firstOfPlatform(platformKey)
+  if (a) void switchAccount(a)
+}
+function removePlatform(platformKey: string): void {
+  const a = firstOfPlatform(platformKey)
+  if (a) void removeAccount(a)
+}
 
 async function load(): Promise<void> {
   panel.beginLoad()
   try {
-    const settled = await Promise.allSettled(
-      ACCOUNT_JOBS.map(([, path]) =>
-        api<IdeAccount[] | { accounts?: IdeAccount[] }>(path),
-      ),
-    )
+    const results = await fetchPlatformAccounts(ACCOUNT_JOBS)
     const merged: IdeAccountVm[] = []
-    settled.forEach((s, i) => {
-      if (s.status !== 'fulfilled') return
-      const d = s.value
-      const list = Array.isArray(d) ? d : (d?.accounts || [])
-      const name = ACCOUNT_JOBS[i][0]
-      list.forEach((a) => merged.push({ ...a, platform: name }))
-    })
+    for (const r of results) {
+      r.accounts.forEach((a) => merged.push({ ...a, platform: r.platform }))
+    }
     raw.value = merged
-    const failed = settled.filter((s) => s.status === 'rejected').length
+    const failed = results.filter((r) => r.error).length
+    failedPlatforms.value = failed
     if (failed) panel.setError(failed + ' 个平台账号查询失败')
   } catch (e) {
     panel.setError((e as Error).message)
@@ -183,6 +210,8 @@ onMounted(load)
 
 <style scoped>
 .ia-notice { margin-bottom: 8px; color: var(--accent); }
+.ia-failed { margin-bottom: 8px; color: var(--bad); }
+.ia-section { margin: 14px 0 8px; }
 .ia-card { display: flex; flex-direction: column; gap: 6px; }
 .ia-actions { display: flex; gap: 6px; margin-top: 8px; }
 .ia-actions button { background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--line); border-radius: 3px; padding: 3px 9px; font-size: 11.5px; cursor: pointer; }

@@ -2,6 +2,8 @@
  * timeRangeLegacy.ts —— 现役用量/日志时间范围控件的查询参数映射移植。
  * 与 T03 useTimeRange（顶栏 today/yesterday/...）是两套口径，互不替代：
  * 这里对应 app.js 的 TRANGE_PRESETS（今天 / 24 / 72 / 168 / 720 / 0 / custom）。
+ * 边界（D7）：这里是用量/日志/统计端点唯一实际生效的口径；顶栏 6 键状态（panel.timeRange）
+ * 不参与本模块的查询参数映射。合并两套需在保持 TestAppJSTimeRangeQuery 断言的前提下另立需求。
  * 对照 Go TestAppJSTimeRangeQuery，证据见 frontend/tests/timeRangeLegacy.test.ts。
  */
 

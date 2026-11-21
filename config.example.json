@@ -54,7 +54,9 @@
     "client_name": "",
     "device_token": "",
     "device_token_file": "",
-    "passthrough_ip": false
+    "passthrough_ip": false,
+    "proxy_enabled": false,
+    "proxy_url": "http://127.0.0.1:7890"
   },
   "features": {
     "sanitize_blacklist_fingerprints": true

@@ -29,6 +29,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/linguo2625469/workbuddy2api-panel/internal/upstream"
 )
 
 const (
@@ -155,7 +157,7 @@ type Client struct {
 
 // New 构造客户端（默认国内站，30s 超时由调用方覆盖）。
 func New() *Client {
-	return &Client{BaseURL: DefaultBase, HTTP: &http.Client{Timeout: 120 * time.Second}, Region: RegionCN}
+	return &Client{BaseURL: DefaultBase, HTTP: &http.Client{Timeout: 120 * time.Second, Transport: upstream.ProxyTransport()}, Region: RegionCN}
 }
 
 // ForRegion 返回指定区域的客户端副本。

@@ -2,7 +2,7 @@
   <div class="wb-view">
     <div class="wb-view-head">
       <h2 class="wb-view-title">积分构成</h2>
-      <span class="wb-view-note">积分包 · 到期分布 · 账号对比（最早到期优先）</span>
+      <span class="wb-view-note">积分包总量 · 到期分布 · 逐账号积分条</span>
       <span class="wb-titlebar-spacer" />
       <TButton size="small" variant="outline" :loading="loading" @click="load(true)">检查（实时）</TButton>
     </div>
@@ -16,15 +16,19 @@
 
     <!-- 到期卡片：契约要求不得写 hidden（issue #137），有数据即渲染 -->
     <div class="wb-card" id="pkExpiry">
-      <div class="wb-card-title">积分到期分布（来自本地状态快照，点「检查」拉实时明细）</div>
-      <div v-if="expiryRows.length" class="pk-expiry-rows">
-        <div v-for="row in expiryRows" :key="row.key" class="pk-expiry-row">
-          <span class="pk-expiry-dot" :style="{ background: expiryColor(row.days) }" />
-          <span class="pk-expiry-when">{{ dayWord(row.days) }}</span>
-          <span class="pk-expiry-credits">{{ fmtCredit(row.credits) }} 积分</span>
-          <span class="pk-expiry-note">{{ row.segments.length }} 个批次 · 日均需耗 ≥ {{ fmtCredit(dailyNeed(row)) }}</span>
-        </div>
-      </div>
+      <div class="wb-card-title">积分到期分布 <span class="wb-view-note">最近到期优先 · 失败垫底 · 本地快照，点「检查」拉实时</span></div>
+      <table v-if="expiryBillRows.length" class="wb-table">
+        <thead><tr><th>账号</th><th>到期日</th><th>剩余</th><th class="num">面额</th><th>提醒</th></tr></thead>
+        <tbody>
+          <tr v-for="row in expiryBillRows" :key="row.key">
+            <td>{{ row.account }}</td>
+            <td>{{ row.date }}</td>
+            <td><StatusTag :text="row.days + ' 天'" :tone="row.tone" /></td>
+            <td class="num">{{ fmtCredit(row.face) }}</td>
+            <td>{{ row.remind }}</td>
+          </tr>
+        </tbody>
+      </table>
       <div v-else class="wb-placeholder">暂无到期批次数据。</div>
     </div>
 
@@ -91,8 +95,16 @@
     </div>
 
     <div class="wb-card" style="margin-top: 12px">
-      <div class="wb-card-title">账号对比明细（逐包，最早到期优先）</div>
+      <div class="wb-card-title">
+        账号对比明细（逐包，最早到期优先）
+        <TButton v-if="hiddenDetailCount" size="small" variant="outline" @click="detailExpanded = !detailExpanded">
+          {{ detailExpanded ? '收起' : '展开更多（+' + hiddenDetailCount + '）' }}
+        </TButton>
+      </div>
       <DataTable :columns="detailColumns" :rows="detailRows" empty-text="暂无积分包明细" />
+      <div v-if="hiddenDetailCount && !detailExpanded" class="wb-view-note pk-detail-note">
+        每个账号默认显示前 {{ DETAIL_LIMIT }} 个批次，另有 {{ hiddenDetailCount }} 个未展开（按最早到期优先）。
+      </div>
     </div>
   </div>
 </template>
@@ -102,23 +114,28 @@ import { computed, onMounted, ref } from 'vue'
 import { Button as TButton } from 'tdesign-vue-next'
 import { api, withQuery } from '@/api/client'
 import type {
-  IdeAccountsResponse, PackagesResponse, TraeCreditsResponse, QoderUsageResult,
+  PackagesResponse, TraeCreditsResponse, QoderUsageResult,
 } from '@/api/types'
 import { usePanelStore } from '@/stores/panel'
+import { fetchPlatformAccounts } from '@/composables/usePlatformAccounts'
+import { ACCOUNT_JOBS } from '@/config/platformSpec'
 import KpiCard from '@/components/KpiCard.vue'
 import DataTable from '@/components/DataTable.vue'
+import StatusTag from '@/components/StatusTag.vue'
 import { fmtCredit } from '@/utils/format'
 import {
-  expBatches, expDaysLeft, pkAccountColorMap, pkAccountSegments, pkDetailGroups,
-  qoderCreditCards, summarizeCreditDays, traeCreditCards,
+  expBatches, expDaysLeft, pkAccountColorMap, pkAccountSegments, pkDayKey,
+  pkDetailGroups, pkExpiryMs, qoderCreditCards, sortByExpiry, traeCreditCards,
   type IdeaCreditCard, type PackAccount,
 } from '@/utils/packages'
 
 /** 积分构成：平台积分包 + 到期分布 + 账号对比明细（PRD R-03）。 */
 const panel = usePanelStore()
+/** 每账号默认展示的积分包明细条数（J10）：其余折叠，由「展开更多」入口放开。 */
+const DETAIL_LIMIT = 5
 const data = ref<PackagesResponse | null>(null)
 const loading = ref(false)
-const detailLimit = ref(5)
+const detailExpanded = ref(false)
 const ideaLoading = ref(false)
 const ideaCards = ref<IdeaCreditCard[]>([])
 
@@ -129,10 +146,41 @@ const unavailable = computed(() => accounts.value.filter((a) => a.error).length)
 const colors = computed(() => pkAccountColorMap(accounts.value))
 const nowMs = ref(Date.now())
 
-const summary = computed(() => summarizeCreditDays(accounts.value, nowMs.value))
-const expiryRows = computed(() => summary.value.rows)
 const noExpiry = computed(() => accounts.value.filter((a) => !a.error && (a.packages || []).every((p) => !pkExpiryText(p))).length)
 const today = computed(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d })
+interface ExpiryBillRow {
+  key: string
+  account: string
+  date: string
+  days: number
+  face: string
+  remind: string
+  tone: string
+}
+// 到期分布明细：逐批次取真实到期日/面额，失败账号跳过，最多展示 DETAIL_LIMIT 行。
+const expiryBillRows = computed<ExpiryBillRow[]>(() => {
+  const out: ExpiryBillRow[] = []
+  for (const a of sortByExpiry(accounts.value, today.value)) {
+    if (a.error) continue
+    for (const p of a.packages || []) {
+      const remain = Number(p.remain || 0)
+      const expiry = pkExpiryMs(p)
+      if (remain <= 0 || expiry == null) continue
+      const days = Math.max(0, Math.ceil((expiry - nowMs.value) / 86400000))
+      const face = Number(p.size)
+      out.push({
+        key: a.uid + ':' + String(p.id || p.name || '') + ':' + expiry,
+        account: a.nickname || a.uid.slice(0, 8),
+        date: pkDayKey(expiry).slice(5),
+        days,
+        face: Number.isFinite(face) && face > 0 ? fmtCredit(face) : '—',
+        remind: days <= 2 ? '即将到期' : days <= 7 ? '关注' : '正常',
+        tone: days <= 2 ? 'bad' : days <= 7 ? 'warn' : 'ok',
+      })
+    }
+  }
+  return out.sort((x, y) => x.days - y.days).slice(0, DETAIL_LIMIT)
+})
 const expiringSoon = computed(() => accounts.value.reduce((s, a) => {
   if (a.error) return s
   return s + expBatches(a.packages || [])
@@ -145,10 +193,6 @@ function pkExpiryText(p: { end_time?: string; expires_at?: number }): boolean {
 }
 function colorOf(uid: string): string { return colors.value.get(uid) || 'var(--accent)' }
 function segmentsOf(a: PackAccount) { return pkAccountSegments(a, nowMs.value) }
-function expiryColor(days: number): string { return days <= 3 ? 'var(--bad)' : days <= 7 ? 'var(--warn)' : 'var(--ok)' }
-function dayWord(days: number): string { return days === 0 ? '今天到期' : days === 1 ? '明天到期' : days + ' 天后到期' }
-function dailyNeed(row: { credits: number; days: number }): number { return Math.ceil(row.credits / Math.max(1, row.days)) }
-
 const detailColumns = [
   { key: 'source', title: '来源' },
   { key: 'uid', title: '账号' },
@@ -156,11 +200,16 @@ const detailColumns = [
   { key: 'size', title: '面额', numeric: true, format: (v: unknown) => fmtCredit(v) },
   { key: 'expiry', title: '到期' },
 ]
+/** 所有账号被折叠的正余额包总数；为 0 时不显示「展开更多」入口。 */
+const hiddenDetailCount = computed(() => accounts.value.reduce(
+  (s, a) => s + pkDetailGroups(a.packages || [], DETAIL_LIMIT).rest.length, 0))
+
 const detailRows = computed<Array<Record<string, unknown>>>(() => {
   const out: Array<Record<string, unknown>> = []
   for (const a of accounts.value) {
-    const groups = pkDetailGroups(a.packages || [], detailLimit.value)
-    for (const p of [...groups.visible, ...groups.rest]) {
+    const groups = pkDetailGroups(a.packages || [], DETAIL_LIMIT)
+    const packs = detailExpanded.value ? [...groups.visible, ...groups.rest] : groups.visible
+    for (const p of packs) {
       out.push({
         source: p.name || '(未命名)',
         uid: a.nickname || a.uid.slice(0, 8),
@@ -194,16 +243,17 @@ async function load(force = false): Promise<void> {
 async function loadIdea(): Promise<void> {
   ideaLoading.value = true
   try {
+    const qoderJobs = ACCOUNT_JOBS.filter(([key]) => key === 'qoder')
     const [tr, qa] = await Promise.allSettled([
       api<TraeCreditsResponse>('trae/credits'),
-      api<IdeAccountsResponse>('ide/qoder/accounts'),
+      fetchPlatformAccounts(qoderJobs),
     ])
     const cards: IdeaCreditCard[] = []
     if (tr.status === 'fulfilled') {
       cards.push(...traeCreditCards(tr.value.accounts || []))
     }
     if (qa.status === 'fulfilled') {
-      const qAccounts = qa.value.accounts || []
+      const qAccounts = qa.value.find((r) => r.platform === 'qoder')?.accounts || []
       const usages = await Promise.all(qAccounts.map((a) =>
         api<QoderUsageResult>(withQuery('ide/qoder/usage', { email: String(a.email || '') }))
           .catch(() => null as QoderUsageResult | null)))
@@ -224,12 +274,6 @@ onMounted(() => {
 <style scoped>
 .pk-bars { display: flex; gap: 2px; height: 4px; }
 .pk-seg { height: 4px; border-radius: 2px; min-width: 2px; }
-.pk-expiry-rows { display: flex; flex-direction: column; gap: 6px; }
-.pk-expiry-row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; background: var(--surface-2); border-radius: var(--wb-radius); font-size: 12.5px; }
-.pk-expiry-dot { width: 8px; height: 8px; border-radius: 50%; }
-.pk-expiry-when { color: var(--ink); min-width: 90px; }
-.pk-expiry-credits { color: var(--accent); font-variant-numeric: var(--wb-tabular); }
-.pk-expiry-note { color: var(--ink-3); flex: 1; }
 /* IDE 平台积分卡（Trae / Qoder） */
 .pk-idea-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
 .pk-idea-card { padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--wb-radius); min-width: 0; }

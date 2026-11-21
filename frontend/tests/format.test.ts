@@ -5,11 +5,14 @@
 import { describe, expect, it } from 'vitest'
 import {
   caTime,
+  clockFull,
+  clockShort,
   fmtCredit,
   fmtCreditRatio,
   fmtLocalDateTime,
   fmtModelRate,
   parseAPITime,
+  pct,
   trimFixed,
 } from '../src/utils/format'
 
@@ -41,5 +44,24 @@ describe('积分维度格式（TestAppJSCreditDimensionFormatting）', () => {
     expect(fmtModelRate('0.5')).toBe('x0.5')
     expect(fmtModelRate('')).toBe('—')
     expect(trimFixed('1.2500')).toBe('1.25')
+  })
+})
+
+describe('百分比与时刻展示（P0 D5 行为锁定）', () => {
+  it('pct 一位小数 + %；非有限值 → —', () => {
+    expect(pct(12.34)).toBe('12.3%')
+    expect(pct(0)).toBe('0.0%')
+    expect(pct('abc')).toBe('—')
+  })
+
+  it('clockFull 非法值原样、空值 → —', () => {
+    expect(clockFull('')).toBe('—')
+    expect(clockFull('garbage')).toBe('garbage')
+  })
+
+  it('clockShort 空/零值/非法 → —', () => {
+    expect(clockShort('')).toBe('—')
+    expect(clockShort('0001-01-01T00:00:00Z')).toBe('—')
+    expect(clockShort('not-a-date')).toBe('—')
   })
 })

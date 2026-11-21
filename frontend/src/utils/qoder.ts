@@ -92,3 +92,42 @@ export function qdBucketHTML(d: QoderBatch): string {
     '<div class="note" style="padding:6px 0">本次尝试 ' + results.length + ' 个 · ' + esc(sum) + '</div>' +
     gainLine + groupLine + orderLine + '</div>'
 }
+
+/** Qoder 分桶汇总的结构化视图模型；字段为已归一的纯文本，由 Vue 插值自动转义。 */
+export interface QdBucketView {
+  /** 本次尝试账号数。 */
+  attempts: number
+  /** 七相计数文案，如「已领取 1 · 今日已领 1」。 */
+  summary: string
+  /** 本轮实际入账文案；credits_total<=0 时为空串，模板不渲染该行。 */
+  gain: string
+  /** 额度组说明文案；无额度组时为空串。 */
+  groups: string
+  /** 本轮顺序文案；无 rotation_order 时为空串。 */
+  rotation: string
+}
+
+/**
+ * qdBucketHTML 的结构化等价物：汇总口径逐字一致，但返回纯文本而非拼接 HTML（QA D7）。
+ * 与 qdBucketHTML 并列保留：后者供 Go→Vitest 契约测试断言，本函数供 CheckinView 模板插值。
+ */
+export function qdBucketView(d: QoderBatch): QdBucketView | null {
+  const results = Array.isArray(d && d.results) ? (d.results as QoderResult[]) : []
+  if (!results.length) return null
+  const counts = qdCounts(results)
+  const summary = QD_PHASE_ORDER.filter((p) => counts[p] > 0)
+    .map((p) => qdPhaseText(p) + ' ' + counts[p]).join(' · ')
+  const gained = Number(d && d.credits_total) || 0
+  const gain = gained > 0 ? '本轮实际入账：+' + gained + ' Credits' : ''
+  const groups = Array.isArray(d && d.quota_groups) ? (d.quota_groups as unknown[]) : []
+  const takenOver = results.filter((r) => r && (r.quota_taken_by || r.same_person_taken)).length
+  const groupText = groups.length
+    ? '额度组 ' + groups.length + ' 个（组 = 服务端判定同人的号，组内只有 1 个即独享一份' +
+      (takenOver > 0 ? '；今天有 ' + takenOver + ' 个号的额度被同组另一个号领走' : '') + '）'
+    : ''
+  const rot = Array.isArray(d && d.rotation_order) ? (d.rotation_order as string[]) : []
+  const rotation = rot.length
+    ? '本轮顺序：' + rot.map((e, i) => (e ? (i + 1) + '. ' + e : '')).filter(Boolean).join(' · ')
+    : ''
+  return { attempts: results.length, summary, gain, groups: groupText, rotation }
+}

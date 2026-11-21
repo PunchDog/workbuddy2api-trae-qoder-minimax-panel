@@ -137,6 +137,26 @@ export function formatTokenCount(tokens: unknown): string {
   return trimFixed((n / unit[1]).toFixed(2)) + ' ' + unit[0]
 }
 
+/** 百分比展示（UsageView/CheckinView 共用口径）：一位小数 + %；非有限值 → —。 */
+export function pct(v: unknown): string {
+  const n = Number(v)
+  return Number.isFinite(n) ? n.toFixed(1) + '%' : '—'
+}
+
+/** 完整本地时刻（UsageView/CheckinView 口径）：非法值原样返回便于排错。 */
+export function clockFull(v?: string): string {
+  if (!v) return '—'
+  const d = new Date(v)
+  return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleString('zh-CN', { hour12: false })
+}
+
+/** 时刻（ModelsView 口径）：仅时分秒；空/零值/非法 → —。 */
+export function clockShort(v?: string): string {
+  if (!v || v.startsWith('0001-')) return '—'
+  const d = new Date(v)
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleTimeString('zh-CN', { hour12: false })
+}
+
 /** 账号脱敏：邮箱 → 稳定短码；非邮箱原样。 */
 export function identLabel(email: unknown, fallback = '未命名'): string {
   const s = String(email == null ? '' : email).trim()

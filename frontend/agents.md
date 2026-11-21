@@ -1,6 +1,6 @@
-# agents.md — frontend（Vue3 + tdesign + Vite + ECharts 前端工程）
+# agents.md — frontend（Vue3 + tdesign + Vite 前端工程）
 
-> 状态：T01–T04/T07 全部落地（8 视图 + 7 弹窗 + 三图） ｜ 最后同步：2026-11-20 ｜ 维护人：AI 执行者 ｜ 验收：待 QA 独立验收
+> 状态：P0–P5 + S1 已落地 + 预览对齐修正（8 独立视图 + 7 弹窗；v-html 清零；时间口径双轨裁决；KPI 单一口径；模型双列 + opencode realm；用量页四卡/三配额卡/按模型明细；J7 三图按方案B删除；日志端点失败显式化；D14 Go 任务码映射 + any 清零；S1 代理两字段配置） ｜ 最后同步：2026-11-21 ｜ 维护人：AI 执行者 ｜ 验收：待 QA 独立验收
 
 ## 1. 目录职责
 
@@ -12,34 +12,39 @@
 
 | 文件 | 作用 |
 |---|---|
-| `package.json` / `package-lock.json` | 依赖声明与锁定（`npm ci` 可复现）；含 echarts ^5.6.0 + vue-echarts ^7.0.3 |
-| `vite.config.ts` | base `/panel/`、dev 9245 + `/panel/api` proxy、`modulePreload.polyfill:false`、echarts `manualChunks` 拆包 |
+| `package.json` / `package-lock.json` | 依赖声明与锁定（`npm ci` 可复现）；J7 后已移除 echarts / vue-echarts |
+| `vite.config.ts` | base `/panel/`、dev 9245 + `/panel/api` proxy、`modulePreload.polyfill:false`（J7 后无 manualChunks） |
 | `tsconfig.json` | TS 严格模式、`@/` 路径别名 |
 | `index.html` | Vite 入口，只有 `#app` + 外链 module script，**禁止内联脚本** |
-| `src/main.ts` / `src/App.vue` | 应用入口 + 布局壳（侧栏 208px + 顶栏 + 7 路由出口 + 7 弹窗挂载） |
+| `src/main.ts` / `src/App.vue` | 应用入口 + 布局壳（侧栏 208px + 顶栏 + 8 独立路由出口，`:key=refreshTick` 重挂载刷新 + 全局弹窗挂载） |
 | `src/api/client.ts` | 同源 fetch：Bearer / 401 事件 / GET 在途合并 / multipart / 15s 超时 |
-| `src/api/types.ts` / `src/api/stats.ts` | 手写 TS 契约与三个统计端点封装（T03/T07） |
-| `src/stores/*` / `src/composables/*` | pinia 状态、主题、时间维度、图表令牌订阅 |
-| `src/views/*.vue` | 7 导航视图：checkin（含 CheckinPackagesView 合并容器 + CheckinView/PackagesView 两 tab）/ usage / taskscenter / ideaccounts / models / config / logs |
+| `src/api/types.ts` / `src/api/stats.ts` | 手写 TS 契约（含 `TaskQueueItem`/`TaskQueueResponse`/`RequestMetricsResponse`，P5 D14）与三个统计端点封装（T03/T07） |
+| `src/stores/*` / `src/composables/*` | pinia 状态、主题、时间维度；`usePlatformAccounts.ts` 三视图共用账号拉取（P2 D3） |
+| `src/config/configSpec.ts` / `platformSpec.ts` | 配置表单字段 spec（D9，S1 增「代理转发」`proxy_enabled`/`proxy_url`）与平台元数据单一表（D13） |
+| `src/utils/credits.ts` | P3 D15：签到页额度水位与平台卡同源口径；`wbCreditTotal` + `isWorkBuddyRealm` 为唯一事实源 |
+| `src/utils/qoder.ts` / `tasks.ts` / `requests.ts` | 契约 HTML 函数并列结构化 View 函数（`qdBucketView`/`qrowView`/`reqOutcomeView`），供 Vue 插值替代 v-html（P3 D7）；`tasks.ts` 另导出 `GO_TASK_TITLES`/`taskTitle`（P5 D14，码表逐字取自 Go `autotask.go`，未知码标注「未映射」） |
+| `src/utils/statsCharts.ts` | J7 后不再服务界面渲染；保留 option / tooltip / 数据透明纯函数供契约断言，类型别名不引 echarts 运行时 |
+| `src/utils/models.ts` | 模型筛选/排序 + `mdRawId`（J5 工具内原始 ID）+ `formatRate`（D12 Infinity 收敛） |
+| `src/views/*.vue` | 8 独立导航视图：checkin / usage / packages / taskscenter / ideaccounts / models / config / logs（CheckinPackagesView 合并容器已删，packages 为独立页） |
 | `src/dialogs/*.vue` | 7 类弹窗（添加账号 6 tab、积分任务、Qoder 设备/领取、券码、密钥、构建失配） |
-| `src/components/charts/*.vue` | T07 三图：TrendChart / HeatmapChart / BreakdownChart + EChartBase |
-| `src/styles/tokens.css` / `app.css` | 令牌唯一色值源（暗色默认）；布局/卡片/图表样式 |
-| `embed.go` | `DistFS` / `IndexHTML()` / `Open()`；Go 侧唯一 embed 宿主 |
+| `src/components/*.vue` | 通用组件：KpiCard/StatusTag/PlatformCard/DataTable/TimeRangeSwitch/ScanErrorBanner（P4 加可选 title，供日志端点失败复用）；`QuotaSummaryCards.vue` 签到页与用量页共用配额两卡 + #third 插槽（P2 D1），`showHours` prop 控制标题是否带「近 Nh」（用量页按预览传 false） |
+| `src/styles/tokens.css` / `app.css` | 令牌唯一色值源（暗色默认，含 `--wb-series-N` 序列色与 `--wb-on-accent`）；布局/卡片样式 |
+| `embed.go` | `DistFS` / `IndexHTML()` / `Open(name)`；Go 侧唯一 embed 宿主 |
 | `dist/.gitkeep` | 干净 checkout 下保证 `go:embed` 可编译，**必须入库** |
-| `tests/*` / `src/**/*.test.ts` | Vitest 14 files / 108 tests；`apiPaths.test.ts` 从 Go 源码提取路由白名单自动守卫端点漂移；`CONTRACT_MAP.md` 记录 25 项 Go Test 对照 |
+| `tests/*` / `src/**/*.test.ts` | Vitest 16 files / 158 tests（预览对齐修正后）；`models.test.ts` 锁 OpenCode realm 选项与 `opencode:` 前缀归一，`routing.test.ts` 锁用量页无分组卡/默认按模型/数据覆盖说明可见/J7 三图不回退；`credits.test.ts`（D15）、qrow/qdBucket 结构化视图测试、formatRate/mdRawId 测试；`tasks.test.ts` 从 Go `autotask.go` 提取 `TaskCode` 集合双向守卫 D14 码表；`config.test.ts` 从 Go `config.go` 回读 JSON tag 双向守卫代理字段；`apiPaths.test.ts` 从 Go 源码提取路由白名单自动守卫端点漂移；`routing.test.ts` 锁 8 导航/视图接线/到期卡不隐藏/J10 展开/D1-D3 共用件；`CONTRACT_MAP.md` 记录 25 项 Go Test 对照（#11/#20 随 J7 关闭） |
 
 ## 3. 关键约束
 
 - 严格 CSP：`dist/index.html` 不得出现内联 `<script>`、`eval`、`new Function`；
   `vite.config.ts` 的 `build.modulePreload.polyfill` 必须保持 `false`（内联 polyfill 会被杀）。
   `<link rel="modulepreload">` 是同源外链资源提示，允许。
-- 令牌唯一来源：`src/styles/tokens.css`；ECharts 经 `getComputedStyle` 读取，随主题切换 `setOption(..., true)` 重绘。
+- 令牌唯一来源：`src/styles/tokens.css`；`packages.ts` 的 hex 数组仅为无 DOM 时的 fallback，须与 `--wb-series-N` 逐字一致。
 - API 走同源 `fetch('/panel/api/...')`，Bearer 读 `localStorage['wb2api.key']`，401 触发 `wb2api:key-required`；
   端点必须命中 Go `HandleFunc` 白名单（`tests/apiPaths.test.ts` 自动守卫）。
-- 图表按需注册 `LineChart/HeatmapChart/PieChart` + 四个组件 + `CanvasRenderer`，**禁 echarts-gl**；
-  渐变使用 `new graphic.LinearGradient(...)` 字面量，不做字符串解析。
+- 日志页三端点失败必须经 ScanErrorBanner 显式提示，禁止 `.catch(() => 空值)` 静默吞成「暂无记录」（P4 D11）。
+- 模型页单价统一走 `formatRate` → `fmtModelRate`，视图不再写 Infinity 三元 hack（P4 D12）；刷新由 App `:key=refreshTick` 重挂载覆盖，不另加 watch。
 - 数据透明：`missing_intervals` 标注「补零，非真实 0」、`days_without_hour_data` 标注「不参与着色」、
-  `excluded`（豆包）与 `credit_samples=0` 明确说明，不伪造数据。
+  `excluded`（豆包）与 `credit_samples=0` 明确说明，不伪造数据（J7 后由 `statsCharts.ts` 纯函数契约断言锁定）。
 - `dist/` 整体 gitignore，仅 `dist/.gitkeep` 例外；构建脚本会在 build 后补回该占位文件。
 
 ## 4. 对外接口 / 依赖
@@ -50,7 +55,7 @@
 
 ## 7. 裁决检查项
 
-- [ ] 改 Vite `base`/`build`/`manualChunks`？→ 同步 `internal/panel` 静态路由前缀与本索引
+- [ ] 改 Vite `base`/`build`？→ 同步 `internal/panel` 静态路由前缀与本索引
 - [ ] 产物出现内联脚本 / eval / new Function？→ 立即修 `vite.config.ts`，并跑 CSP 守卫
 - [ ] 新增/删除/重命名文件？→ 同步本索引与根 `agents.md`
 - [ ] 新增 API 调用？→ 确认路径在 Go 路由白名单内，跑 `apiPaths.test.ts`

@@ -36,6 +36,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/linguo2625469/workbuddy2api-panel/internal/upstream"
 )
 
 const (
@@ -112,7 +114,8 @@ type Client struct {
 // NewClient 构造客户端；零值字段回落到与网页端一致的缺省值。
 func NewClient(hc *http.Client) *Client {
 	if hc == nil {
-		hc = &http.Client{Timeout: 0}
+		// 消息转发走全局代理（J8：签到通道另用 traeclient 的禁代理客户端，不受此处影响）。
+		hc = &http.Client{Timeout: 0, Transport: upstream.ProxyTransport()}
 	}
 	return &Client{
 		HTTP:        hc,

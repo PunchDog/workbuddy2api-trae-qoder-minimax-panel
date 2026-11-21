@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/linguo2625469/workbuddy2api-panel/internal/upstream"
 )
 
 // ---------------------------------------------------------------------------
@@ -101,6 +102,8 @@ func (d *QoderDevice) Apply(h http.Header) {
 //     静默直连会让请求从本机真实出口发出去，而调用方以为已经做了隔离。
 func (d *QoderDevice) NewHTTPClient(timeout time.Duration) (*http.Client, error) {
 	tr := cloneQoderDefaultTransport()
+	// J9：先铺全局兜底代理；下面设备 ProxyURL 非空时再覆盖，设备级优先。
+	upstream.ApplyGlobalProxy(tr)
 	proxy := ""
 	if d != nil {
 		proxy = strings.TrimSpace(d.ProxyURL)

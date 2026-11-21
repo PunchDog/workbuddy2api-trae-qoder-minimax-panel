@@ -1,6 +1,6 @@
 <template>
   <div v-if="errors.length" class="wb-scan-error scan-error" role="alert">
-    <div class="wb-scan-error-head">扫描失败：以下账号/口径没有取到任务列表（不再显示「没有待办」）</div>
+    <div class="wb-scan-error-head">{{ title }}</div>
     <div v-for="(e, i) in errors" :key="i" class="wb-scan-error-line">
       {{ e.uid || '号池' }}<template v-if="e.scope"> · {{ e.scope }}</template>：{{ e.message || '未知错误' }}
     </div>
@@ -11,8 +11,10 @@
 <script setup lang="ts">
 import type { ScanError } from '@/utils/tasks'
 
-/** 任务中心扫描错误横幅（C-WB-SCAN@1）：scan_ok=false 必显，与空态互斥。 */
-defineProps<{ errors: ScanError[] }>()
+/** 数据拉取失败横幅（C-WB-SCAN@1）：失败口径必显，与空态互斥；title 允许日志页复用。 */
+withDefaults(defineProps<{ errors: ScanError[]; title?: string }>(), {
+  title: '扫描失败：以下账号/口径没有取到任务列表（不再显示「没有待办」）',
+})
 </script>
 
 <style scoped>

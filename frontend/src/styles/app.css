@@ -325,3 +325,84 @@ body {
   line-height: 1.5;
   margin-top: 4px;
 }
+
+/* ── 公共明细表（P0 D4）─────────────────────────────────────────
+   统一 DataTable / ModelsView / LogsView 三处重复的 .wb-table 样式；
+   类名全局唯一，色值全部取自 tokens.css。 */
+.wb-table-wrap {
+  overflow: auto;
+  max-height: 460px;
+  border: 1px solid var(--line);
+  border-radius: var(--wb-radius);
+}
+.wb-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.wb-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+  font-weight: 500;
+}
+.wb-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+}
+.wb-table td.num,
+.wb-table th.num {
+  text-align: right;
+  font-variant-numeric: var(--wb-tabular);
+}
+.wb-table td.clip {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-table tbody tr:hover {
+  background: var(--surface-2);
+}
+.wb-table-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--ink-3);
+}
+.wb-table-count {
+  padding: 6px 10px;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+/* ── 公共配额卡网格与行（P2 D1）──────────────────────────────────
+   签到页/用量页的 OpenCode、官方用量、第三卡（slot）共用；
+   统一替代原 .ck-special-row / .us-special-row 两处 scoped 副本。 */
+.wb-special-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.wb-special-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+}
+.wb-special-row b {
+  font-variant-numeric: var(--wb-tabular);
+}
+.wb-special-row small {
+  color: var(--ink-3);
+}

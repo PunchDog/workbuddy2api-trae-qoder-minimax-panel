@@ -1,7 +1,7 @@
 /*
  * routing.test.ts —— 迁移 Go 结构性守卫到 Vitest：
  * TestIndexHTMLNoInlineScript（CSP）、TestPanelIndexExpiryBoxNotHidden、
- * TestFrontendRepairContractAnchors，并锁定 7 导航项（+packages 别名）与 7 类弹窗接线。
+ * TestFrontendRepairContractAnchors，并锁定 8 导航项（积分构成独立）与 7 类弹窗接线。
  * 图表相关 TestAppJSUsageChartBarClass / ChartTooltipInsideBar 属 T07，本批次不接图表。
  */
 import fs from 'node:fs'
@@ -14,14 +14,14 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const srcDir = path.resolve(here, '../src')
 const readSrc = (rel: string): string => fs.readFileSync(path.resolve(srcDir, rel), 'utf8')
 
-describe('7 导航项（默认 #checkin，packages 为合并页别名）', () => {
-  it('导航项齐全且顺序固定（签到池+积分构成已合并）', () => {
+describe('8 导航项（默认 #checkin，积分构成独立）', () => {
+  it('导航项齐全且顺序固定：签到池→用量→积分构成→任务中心→IDE账号→模型→配置→日志', () => {
     expect(NAV_ITEMS.map((i) => i.key)).toEqual([
-      'checkin', 'usage', 'taskscenter', 'ideaccounts', 'models', 'config', 'logs',
+      'checkin', 'usage', 'packages', 'taskscenter', 'ideaccounts', 'models', 'config', 'logs',
     ])
   })
 
-  it('未知 hash 回落到 checkin；#packages 仍解析为合并页别名', () => {
+  it('未知 hash 回落到 checkin；#packages 为合法独立视图键', () => {
     for (const key of NAV_ITEMS) {
       expect(viewFromHash('#' + key.key)).toBe(key.key)
     }
@@ -31,21 +31,21 @@ describe('7 导航项（默认 #checkin，packages 为合并页别名）', () =>
     expect(viewFromHash('#/usage?x=1')).toBe('usage')
   })
 
-  it('App.vue 接入全部视图，checkin/packages 同指合并容器，无 PlaceholderView', () => {
+  it('App.vue 接入全部 8 个独立视图，无 PlaceholderView', () => {
     const app = readSrc('App.vue')
     for (const [key, comp] of Object.entries(VIEW_COMPONENTS)) {
       expect(app, `路由 ${key} 未接入 ${comp}`).toContain(`${key}: ${comp}`)
     }
     expect(app).not.toContain('PlaceholderView')
-    expect(app).toContain('CheckinPackagesView')
+    expect(app).not.toContain('isNavActive(key: ViewKey): boolean {\n  return panel.currentView === key ||')
   })
 })
 
 /** 视图键 → 组件名（与 App.vue 的 VIEW_COMPONENTS 一一对应）。 */
 const VIEW_COMPONENTS: Record<string, string> = {
-  checkin: 'CheckinPackagesView',
-  packages: 'CheckinPackagesView',
+  checkin: 'CheckinView',
   usage: 'UsageView',
+  packages: 'PackagesView',
   taskscenter: 'TasksCenterView',
   ideaccounts: 'IdeAccountsView',
   models: 'ModelsView',
@@ -53,17 +53,38 @@ const VIEW_COMPONENTS: Record<string, string> = {
   logs: 'LogsView',
 }
 
-describe('签到池 + 积分构合同页', () => {
-  it('合并容器接入两个子视图并提供 tab 切换', () => {
-    const cp = readSrc('views/CheckinPackagesView.vue')
-    expect(cp).toContain('CheckinView')
-    expect(cp).toContain('PackagesView')
-    expect(cp).toContain('签到池')
-    expect(cp).toContain('积分构成')
-    expect(cp).toContain('KeepAlive')
-    // 两个子视图仍保留原有标题，合并只加 tab 壳，不改子视图内部。
+describe('签到池与积分构成各自独立', () => {
+  it('两个视图保留各自标题，无合并 tab 壳', () => {
     expect(readSrc('views/CheckinView.vue')).toContain('签到池')
     expect(readSrc('views/PackagesView.vue')).toContain('积分构成')
+  })
+
+  it('合并容器 CheckinPackagesView 已删除，无残留文件', () => {
+    expect(fs.existsSync(path.resolve(srcDir, 'views/CheckinPackagesView.vue'))).toBe(false)
+  })
+
+  it('J10 明细默认折叠 + 展开更多入口，且到期卡不隐藏', () => {
+    const pkg = readSrc('views/PackagesView.vue')
+    expect(pkg).toContain('DETAIL_LIMIT = 5')
+    expect(pkg).toContain('展开更多')
+    expect(pkg).toContain('detailExpanded')
+    expect(pkg).toContain('id="pkExpiry"')
+  })
+
+  it('D1 配额两卡共用 QuotaSummaryCards，第三卡由插槽提供', () => {
+    for (const view of ['views/CheckinView.vue', 'views/UsageView.vue']) {
+      const src = readSrc(view)
+      expect(src, view + ' 未接入共用配额卡').toContain('QuotaSummaryCards')
+      expect(src, view + ' 残留旧行样式').not.toMatch(/ck-special-row|us-special-row/)
+    }
+    expect(fs.existsSync(path.resolve(srcDir, 'components/QuotaSummaryCards.vue'))).toBe(true)
+  })
+
+  it('D3 三视图共用平台拉取 composable', () => {
+    expect(fs.existsSync(path.resolve(srcDir, 'composables/usePlatformAccounts.ts'))).toBe(true)
+    for (const view of ['views/CheckinView.vue', 'views/IdeAccountsView.vue', 'views/PackagesView.vue']) {
+      expect(readSrc(view), view + ' 未接入 usePlatformAccounts').toContain('fetchPlatformAccounts')
+    }
   })
 })
 
@@ -120,6 +141,25 @@ describe('到期卡片不隐藏（TestPanelIndexExpiryBoxNotHidden）', () => {
     expect(pkg).toContain('到期')
     // 不得出现 v-show="false" / hidden 写死在到期分布卡上
     expect(pkg).not.toMatch(/pkExpiry[^>\n]*hidden/)
+  })
+})
+
+describe('用量页对齐预览（J7 三图不恢复）', () => {
+  it('四 KPI + 三配额卡，默认按模型，覆盖说明为可见卡片', () => {
+    const usage = readSrc('views/UsageView.vue')
+    expect(usage).not.toContain('wb-card-grid')
+    expect(usage).toContain('show-hours="false"')
+    expect(usage).toContain("officialDim = ref<'account' | 'model' | 'day'>('model')")
+    expect(usage).toContain('missing_intervals 为补零，非真实 0')
+    expect(usage).toContain('successRate')
+    expect(usage).not.toContain('TTooltip')
+    expect(usage).not.toContain('用量趋势')
+  })
+
+  it('共用配额卡支持按页面隐藏官方用量时间窗', () => {
+    const cards = readSrc('components/QuotaSummaryCards.vue')
+    expect(cards).toContain('showHours?: boolean')
+    expect(cards).toContain('官方用量<template v-if="showHours">')
   })
 })
 

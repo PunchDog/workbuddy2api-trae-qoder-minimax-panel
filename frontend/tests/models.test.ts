@@ -2,10 +2,15 @@
  * models.test.ts —— 迁移 Go TestAppJSModelFilter 到 Vitest。
  * 模型数据逐字取自现役 frontend_test.go 的用例，确保筛选/排序行为等价。
  */
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   filterModels,
+  formatRate,
   mdMatch,
+  mdRawId,
   mdRateValue,
   mdSortList,
   type ModelRow,
@@ -87,5 +92,48 @@ describe('模型筛选（TestAppJSModelFilter）', () => {
     const snapshot = ids(models)
     filterModels(models, { realm: 'cn', cap: 'tool' })
     expect(ids(models)).toEqual(snapshot)
+  })
+})
+
+describe('单价展示值（D12 收敛 Infinity）', () => {
+  it('无价返回空串，其他值返回原文', () => {
+    expect(formatRate(models[3])).toBe('')
+    expect(formatRate(models[1])).toBe('0')
+    expect(formatRate(models[0])).toBe('0.4')
+  })
+})
+
+describe('模型双列 ID（J5）', () => {
+  it('后端 raw_id 优先，不被对外 id 前缀覆盖', () => {
+    expect(mdRawId({ id: 'cn:hy4', raw_id: 'hy4' })).toBe('hy4')
+    expect(mdRawId({ id: 'opencode:hy4', raw_id: 'hy4-flashe-free' })).toBe('hy4-flashe-free')
+  })
+
+  it('raw_id 缺失时按确定规则去掉工具前缀', () => {
+    expect(mdRawId({ id: 'workbuddycn:hy4' })).toBe('hy4')
+    expect(mdRawId({ id: 'global:MiniMax-M2.1' })).toBe('MiniMax-M2.1')
+  })
+
+  it('无前缀或空值显示占位，不伪造 ID', () => {
+    expect(mdRawId({ id: 'hy4' })).toBe('— 未映射')
+    expect(mdRawId({ id: 'cn:' })).toBe('— 未映射')
+    expect(mdRawId({ id: '' })).toBe('— 未映射')
+  })
+})
+
+describe('OpenCode 模型目录接入', () => {
+  const here = path.dirname(fileURLToPath(import.meta.url))
+
+  it('realm=opencode 只命中 opencode: 前缀模型', () => {
+    const list: ModelRow[] = [
+      { id: 'opencode:hy4-flashe-free', raw_id: 'hy4-flashe-free', vendor: 'OpenCode' } as ModelRow,
+      { id: 'cn:hy4' },
+    ]
+    expect(ids(filterModels(list, { realm: 'opencode' }))).toEqual(['opencode:hy4-flashe-free'])
+  })
+
+  it('模型页有 OpenCode 域筛选项', () => {
+    const view = fs.readFileSync(path.resolve(here, '../src/views/ModelsView.vue'), 'utf8')
+    expect(view).toContain('<option value="opencode">OpenCode</option>')
   })
 })

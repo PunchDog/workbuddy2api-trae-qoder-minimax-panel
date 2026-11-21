@@ -43,6 +43,8 @@ export const CFG_MAP: Record<string, string[]> = {
   header_timeout_seconds: ['upstream', 'header_timeout_seconds'],
   idle_timeout_seconds: ['upstream', 'idle_timeout_seconds'],
   user_agent: ['upstream', 'user_agent'],
+  proxy_enabled: ['upstream', 'proxy_enabled'],
+  proxy_url: ['upstream', 'proxy_url'],
   prompt_mode: ['prompt', 'mode'],
   prompt_file: ['prompt', 'file'],
   sanitize_blacklist_fingerprints: ['features', 'sanitize_blacklist_fingerprints'],

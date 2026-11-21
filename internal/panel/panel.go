@@ -517,6 +517,14 @@ func (p *Panel) models(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// OpenCode 转发通道：与 /opencode/v1/models 同源，动态拉取后加 opencode: 前缀。
+	// 不进号池、不参与路由统计；单个可选通道失败不拖垮整张模型表。
+	if p.cfg.LoadConfig != nil {
+		if cfgAny, err := p.cfg.LoadConfig(); err == nil {
+			out = append(out, openCodeModelEntries(r.Context(), cfgAny)...)
+		}
+	}
+
 	if len(out) == 0 {
 		if len(fetchErrs) > 0 {
 			writeErr(w, http.StatusBadGateway, "fetch models: "+strings.Join(fetchErrs, "; "))
@@ -534,6 +542,7 @@ func (p *Panel) models(w http.ResponseWriter, r *http.Request) {
 func panelModelEntry(realm string, mi upstream.ModelInfo, remoteEfforts []string, remoteDefault string, httpc *http.Client) map[string]any {
 	entry := map[string]any{
 		"id":                   realm + ":" + mi.ID,
+		"raw_id":               mi.ID,
 		"name":                 mi.Name,
 		"default_effort":       mi.DefaultEffort,
 		"supported_efforts":    mi.Efforts,

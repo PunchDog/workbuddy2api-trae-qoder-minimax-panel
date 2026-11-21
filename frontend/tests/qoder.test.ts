@@ -3,7 +3,7 @@
  * 用例数据逐字取自现役 frontend_test.go，锁定「只画汇总 / 七相齐全 / 不伪造入账」。
  */
 import { describe, expect, it } from 'vitest'
-import { qdBucketHTML, qdCounts, type QoderBatch } from '../src/utils/qoder'
+import { qdBucketHTML, qdBucketView, qdCounts, type QoderBatch } from '../src/utils/qoder'
 
 const batch: QoderBatch = {
   credits_total: 100,
@@ -47,5 +47,33 @@ describe('Qoder 签到分桶（TestFrontendQoderBuckets）', () => {
   it('credits_total=0 不显示入账行', () => {
     const html = qdBucketHTML({ ...batch, credits_total: 0 })
     expect(html).not.toContain('本轮实际入账')
+  })
+})
+
+describe('Qoder 分桶结构化视图（QA D7 去 v-html）', () => {
+  it('汇总口径与 HTML 函数一致，输出为纯文本', () => {
+    const v = qdBucketView(batch)
+    expect(v).not.toBeNull()
+    expect(v!.attempts).toBe(7)
+    expect(v!.summary).toContain('已领取 1')
+    expect(v!.summary).toContain('错误 1')
+    expect(v!.gain).toBe('本轮实际入账：+100 Credits')
+    expect(v!.groups).toContain('额度组 1 个')
+    for (const field of [v!.summary, v!.gain, v!.groups, v!.rotation]) {
+      expect(field).not.toContain('class=')
+      expect(field).not.toContain('<div')
+    }
+  })
+
+  it('无结果返回 null；credits_total=0 无入账行', () => {
+    expect(qdBucketView({})).toBeNull()
+    expect(qdBucketView({ ...batch, credits_total: 0 })!.gain).toBe('')
+  })
+
+  it('rotation_order 保留原始文本交由 Vue 插值转义，纯函数不拼 HTML', () => {
+    const v = qdBucketView({ ...batch, rotation_order: ['a@x.com', '<b>x</b>'] })!
+    expect(v.rotation).toContain('1. a@x.com')
+    expect(v.rotation).toContain('<b>x</b>')
+    expect(v.rotation).not.toContain('<div')
   })
 })

@@ -134,6 +134,59 @@ export function autoSummaryText(r: AutoResult, secs: number): string {
   return '执行完成（' + secs + 's）：' + parts.join(' · ')
 }
 
+/**
+ * 可自动化任务码 → 中文说明（D14）。逐字取自 Go internal/panel/autotask.go
+ * 的 autoActions[].Desc；码表本身以 Go 为准，前端不臆造新码。
+ */
+export const GO_TASK_TITLES: Record<string, string> = {
+  chat_5: '上报 5 条对话活跃事件（自动补足差额）',
+  first_buddy: '上报解锁 → 同意协议 → 领取第一只 Buddy（+300 分）',
+  'Model_chat_GLM5.2': '接受任务 → glm-5.2 真实对话一次 → 对齐模型上报',
+  RichMeow_Chat: '桌面指纹事件链上报（已验证：纯 API 可点亮，三账号实测）',
+  Buddy_App: '上报「进入 Buddy 应用」事件链（已验证：纯 API 可点亮）',
+  Buddy_App_QQ: '上报「进入企鹅教师助手」事件链（已验证：纯 API 可点亮）',
+  automation_1: '上报「定时任务创建」事件（已验证：纯 API 可点亮）',
+  Library_read: '上报「读资料库介绍」事件（已验证：纯 API 可点亮）',
+  template_5: '上报「使用模板创建任务」事件组 ×5（已验证：三账号点亮）',
+  playbook_prompt: '上报「灵感案例做同款发送 Prompt」事件组（已验证：三账号点亮）',
+  create_canvas: '上报「设计创意画布创建」事件组（已验证：三账号点亮，+300 分）',
+  expert_5: '真实专家召唤+使用链 ×5（专家市场列表+真实 chat，已验证：三账号点亮）',
+  Expert_team_use_3: '真实专家团召唤+使用链 ×3（已验证：三账号点亮）',
+  Hp_Appearance: '设置主题 API + 皮肤生效事件（已验证：两账号点亮）',
+  skill_1: '真实对话 + skill_info 技能加载事件（已验证：人杰2 点亮）',
+  Expert_lighthouse: '真实轻量云专家召唤+使用链（chat 链带 has_expert，已验证：两账号点亮）',
+  black_cat: '夜猫子：23:00–08:00 窗口内 glm-5.2 对话补足（窗口外提示稍后再试）',
+  school_season: '校园日（小程序口径）：accept → mini 对话+activityId 上报 → 领奖（+100c+5e）',
+  Sequential_Tasks_1: '小程序首对话（小程序口径）：accept → mini 对话上报 → 领奖（+100c+5e）',
+  Sequential_Tasks_2: '小程序选专家对话（小程序口径）：市场专家 id → accept → expert_actual_use 上报 → 领奖（+200c+5e）',
+  Sequential_Tasks_3: '小程序五次对话（小程序口径）：accept → mini 对话上报 ×5（自动补差额）→ 领奖（+300c+5e）',
+  Sequential_Tasks_4: '小程序定时任务（预留，每日零点解锁一环）：accept → 定时任务创建事件（PC 同源）→ 领奖（判据待解锁验证）',
+  Sequential_Tasks_5: '小程序使用 GLM5.2（预留）：accept → 带模型字段的 mini 对话上报 → 领奖（判据待解锁验证）',
+  Sequential_Tasks_6: '小程序十次对话（预留）：accept → mini 对话上报 ×target（自动补差额）→ 领奖',
+  Sequential_Tasks_7: '体验灵感功能（预留，疑 PC 口径 +500c+5e）：accept → 灵感事件组（PC+mp 双形态）→ 领奖（判据待解锁验证）',
+  first_chat: '国际版成长路径·完成一次对话（复用桌面对话事件链，尝试型）',
+  template_used: '国际版成长路径·使用一次模板（复用模板使用事件组，尝试型）',
+  expert_summoned: '国际版成长路径·召唤一次专家（复用专家召唤+真实使用链，尝试型）',
+  skill_installed: '国际版成长路径·完成技能安装（复用技能加载事件链，尝试型）',
+}
+
+const DYNAMIC_EXPERT_TITLE = '召唤指定专家 + 真实对话 + 使用链（lighthouse 判据口径；专家 id 取自任务 jump_url / 参数表）'
+
+/** Go autoActionFor 的动态码：expert_use_ 前缀与 WorkBuddy_Valorant 共用通用动作。 */
+export function goTaskTitle(code: string): string {
+  const key = String(code || '').trim()
+  if (GO_TASK_TITLES[key]) return GO_TASK_TITLES[key]
+  if (key.startsWith('expert_use_') || key === 'WorkBuddy_Valorant') return DYNAMIC_EXPERT_TITLE
+  return ''
+}
+
+/** 展示标题：上游 title 优先 → Go 任务码说明 → 原码并标注未映射（D14）。 */
+export function taskTitle(code: string, backendTitle?: string): string {
+  const fromBackend = String(backendTitle || '').trim()
+  if (fromBackend && fromBackend !== code) return fromBackend
+  return goTaskTitle(code) || code + '（未映射）'
+}
+
 export const ST_WORDS: Record<string, string> = {
   done: '完成', partial: '部分完成', unverified: '未证实', failed: '失败',
   running: '执行中', error: '失败', skipped: '跳过', pending: '排队',
@@ -198,6 +251,58 @@ export function qrowHTML(it: QueueRow, titles: Record<string, string> = {}): str
     '</div>'
 }
 
+/** 队列行的结构化视图模型；字段为已归一的纯文本，由 Vue 插值自动转义（QA D7）。 */
+export interface QrowView {
+  /** 任务码，供列表 key 与展示。 */
+  code: string
+  /** 展示标题：开学季固定「开学季闭环」，否则标题表回填或原码。 */
+  title: string
+  /** 状态标签序列：开学季 / 解锁时间 / 需手动 / 动作提示 / 未证实。 */
+  tags: string[]
+  /** 进度文案，形如「3/5」或「3/5 → 4/5」。 */
+  prog: string
+  /** 状态圆点语义类名：run / err / skip / done / wait。 */
+  dotCls: string
+  /** 状态中文词，scan 归一为「待执行」。 */
+  stWord: string
+  /** 归一后的状态码，供 data-q-status 属性使用。 */
+  status: string
+  /** 悬浮与行内提示文案。 */
+  msg: string
+}
+
+/**
+ * qrowHTML 的结构化等价物：verified 与 progress_before → progress_after 可见、假 done 不显示完成，
+ * 口径逐字一致但返回纯文本而非拼接 HTML（QA D7）。
+ * 与 qrowHTML 并列保留：后者供 Go→Vitest 契约测试断言，本函数供 CreditsTaskDialog 插值。
+ */
+export function qrowView(it: QueueRow, titles: Record<string, string> = {}): QrowView {
+  const isSchool = it.kind === 'school'
+  const title = isSchool ? '开学季闭环' : (titles[it.code] || it.code)
+  let status = it.status
+  if (status === 'error') status = 'failed'
+  if (status === 'done' && it.verified === false) status = 'unverified'
+  const dotCls = status === 'running' ? 'run' : status === 'failed' ? 'err'
+    : status === 'skipped' ? 'skip' : status === 'done' ? 'done'
+      : status === 'unverified' ? 'skip' : 'wait'
+  const stWord = status === 'scan' ? '待执行' : (ST_WORDS[status] || status)
+  const lk = status === 'locked' ? String(it.unlock || '') : ''
+  const msg = status === 'locked'
+    ? (lk ? '上游锁定至 ' + lk + '，到点由面板自动执行' : LOCKED_MSG)
+    : status === 'manual' ? (it.message || MANUAL_MSG) : (it.message || '')
+  let prog = it.prog || ''
+  if (it.progress_before !== undefined || it.progress_after !== undefined) {
+    prog = (it.progress_before || '—') + ' → ' + (it.progress_after || '—')
+  }
+  const tags: string[] = []
+  if (isSchool) tags.push('开学季')
+  if (status === 'locked') tags.push(lk ? lk + ' 解锁' : '未解锁')
+  if (status === 'manual') tags.push('需手动')
+  if (it.action && ACTION_TIP[it.action]) tags.push(ACTION_TIP[it.action])
+  if (it.verified === false && (status === 'done' || status === 'partial')) tags.push('未证实')
+  return { code: it.code, title, tags, prog, dotCls, stWord, status, msg }
+}
+
 export interface TaskGroup {
   uid: string
   nick?: string
@@ -214,15 +319,15 @@ export function groupItems(d: ScanResult, titles: Record<string, string> = {}): 
   for (const a of (d && d.accounts) || []) {
     const rows: TaskGroup['rows'] = []
     for (const t of ((a as unknown as { growth?: Array<Record<string, unknown>> }).growth || [])) {
-      titles[String(t.task_code)] = String(t.title || t.task_code)
+      titles[String(t.task_code)] = taskTitle(String(t.task_code), String(t.title || ''))
       rows.push({ kind: 'growth', code: String(t.task_code), prog: t.target ? t.current + '/' + t.target : '—', status: 'scan', action: String(t.action || '') })
     }
     for (const t of ((a as unknown as { growth_locked?: Array<Record<string, unknown>> }).growth_locked || [])) {
-      titles[String(t.task_code)] = String(t.title || t.task_code)
+      titles[String(t.task_code)] = taskTitle(String(t.task_code), String(t.title || ''))
       rows.push({ kind: 'growth', code: String(t.task_code), prog: t.target ? t.current + '/' + t.target : '—', status: 'locked', unlock: String(t.unlock_at || ''), action: String(t.action || '') })
     }
     for (const t of ((a as unknown as { manual?: Array<Record<string, unknown>> }).manual || [])) {
-      titles[String(t.task_code)] = String(t.title || t.task_code)
+      titles[String(t.task_code)] = taskTitle(String(t.task_code), String(t.title || ''))
       rows.push({ kind: 'growth', code: String(t.task_code), prog: t.target ? t.current + '/' + t.target : '—', status: 'manual', message: String(t.task_desc || t.description || ''), action: String(t.action || 'manual') })
     }
     if (rows.length) {

@@ -42,6 +42,25 @@ export function mdRateValue(m: ModelRow): number {
   return Number.isFinite(n) ? n : Infinity
 }
 
+/**
+ * 工具内原始模型 ID（J5）：优先后端 raw_id；缺失时按确定规则从对外 id 去掉首个「工具:」前缀派生。
+ * 两者都无有效值时返回占位，不臆造具体 ID。
+ */
+export function mdRawId(m: ModelRow): string {
+  const raw = m.raw_id == null ? '' : String(m.raw_id).trim()
+  if (raw) return raw
+  const id = String(m.id || '').trim()
+  const i = id.indexOf(':')
+  const derived = i > 0 ? id.slice(i + 1).trim() : ''
+  return derived || '— 未映射'
+}
+
+/** 单价展示值：无价（Infinity）返回空串，视图不再写三元 hack；由 fmtModelRate 统一转成「—」。 */
+export function formatRate(m: ModelRow): string {
+  const value = mdRateValue(m)
+  return value === Infinity ? '' : String(value)
+}
+
 /** 参与关键字搜索的字段拼接（小写）。 */
 export function mdSearchText(m: ModelRow): string {
   return [m.id, m.name, m.vendor, m.description, (m.tags || []).join(' ')]

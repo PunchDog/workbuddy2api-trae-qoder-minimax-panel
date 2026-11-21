@@ -73,7 +73,7 @@ func newDialer() *net.Dialer {
 //     和复用期都能被快速识别（见 dialTimeout/dialKeepAlive 注释）。
 func newTransport() *http.Transport {
 	dialer := newDialer()
-	return &http.Transport{
+	tr := &http.Transport{
 		DialContext: dialer.DialContext,
 		// 空 TLSNextProto（非 nil）真正禁 h2：见函数注释。必须 make 而非 nil——
 		// nil 表示「让标准库注入默认 h2 映射」（kongjianguan 实测：设
@@ -85,6 +85,9 @@ func newTransport() *http.Transport {
 		IdleConnTimeout:       idleConnTimeout,
 		ResponseHeaderTimeout: responseHeaderTimeout,
 	}
+	// 代理 URL 在装配期 ConfigureProxy 已校验；这里只叠加回环豁免的 Proxy 函数。
+	ApplyGlobalProxy(tr)
+	return tr
 }
 
 // NewTransport 为号池外通道（opencode 透明转发等）构造独立的加固出站 Transport。

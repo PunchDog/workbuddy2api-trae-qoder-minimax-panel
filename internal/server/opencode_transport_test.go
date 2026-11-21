@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/linguo2625469/workbuddy2api-panel/internal/upstream"
 )
 
 // opencodeTransportOf 取 handler 惰性构造的转发 Transport（断言失败即 Fatal）。
@@ -42,6 +44,27 @@ func TestOpenCodeTransportHardenedDefault(t *testing.T) {
 	// 惰性单例：同一 handler 复用同一 client（连接池不重建）。
 	if h.opencodeHTTPClient() != h.opencodeClientInst {
 		t.Error("opencodeHTTPClient 应复用同一实例")
+	}
+}
+
+// TestOpenCodeTransportUsesGlobalProxy S1 接入断言：opencode 走 upstream.NewTransport，
+// 必须能读到装配期代理快照（不是只测 newTransport 本身）。
+func TestOpenCodeTransportUsesGlobalProxy(t *testing.T) {
+	t.Cleanup(func() { _ = upstream.ConfigureProxy(false, "") })
+	if err := upstream.ConfigureProxy(true, "http://127.0.0.1:7890"); err != nil {
+		t.Fatalf("ConfigureProxy: %v", err)
+	}
+	tr := opencodeTransportOf(t, newOpenCodeHandler(t, "http://127.0.0.1:1", true))
+	if tr.Proxy == nil {
+		t.Fatal("opencode Transport 未接入全局代理快照")
+	}
+	req, err := http.NewRequest(http.MethodPost, "https://api.opencode.ai/v1/chat/completions", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := tr.Proxy(req)
+	if err != nil || got == nil || got.String() != "http://127.0.0.1:7890" {
+		t.Fatalf("opencode 代理决策不符: url=%v err=%v", got, err)
 	}
 }
 

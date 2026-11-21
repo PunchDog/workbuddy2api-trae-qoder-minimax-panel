@@ -1,7 +1,8 @@
 /*
  * config.test.ts —— 迁移 Go TestConfigFormMatchesCFGMap / TestAppJSCollectConfigClearable
- * 到 Vitest。CFG_MAP 键集合与 utils/config.ts 一致；并通过读取 ConfigView.vue 源码，
- * 断言每个 CFG_MAP 键都有对应控件（等价 Go 侧「表单 name ↔ CFG_MAP 双向匹配」）。
+ * 到 Vitest。CFG_MAP 键集合与 utils/config.ts 一致；并通过读取 config/configSpec.ts 源码
+ * （D9 后字段定义的权威位置），断言每个 CFG_MAP 键都有对应控件
+ * （等价 Go 侧「表单 name ↔ CFG_MAP 双向匹配」，字段外置不改变契约口径）。
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -17,16 +18,16 @@ import {
 } from '../src/utils/config'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
-const viewSrc = fs.readFileSync(path.resolve(here, '../src/views/ConfigView.vue'), 'utf8')
+const viewSrc = fs.readFileSync(path.resolve(here, '../src/config/configSpec.ts'), 'utf8')
 
 describe('配置表单与 CFG_MAP 对齐（TestConfigFormMatchesCFGMap）', () => {
-  it('CFG_MAP 每个键在 ConfigView 里都有 name 控件', () => {
+  it('CFG_MAP 每个键在 configSpec 里都有 name 控件', () => {
     for (const name of Object.keys(CFG_MAP)) {
       expect(viewSrc, `CFG_MAP 键 ${name} 缺少表单控件`).toContain(`name: '${name}'`)
     }
   })
 
-  it('ConfigView 声明的控件名都在 CFG_MAP 里', () => {
+  it('configSpec 声明的控件名都在 CFG_MAP 里', () => {
     const declared = [...viewSrc.matchAll(/name: '([a-z_0-9]+)'/g)].map((m) => m[1])
     expect(declared.length).toBeGreaterThan(0)
     for (const name of declared) {
@@ -37,6 +38,27 @@ describe('配置表单与 CFG_MAP 对齐（TestConfigFormMatchesCFGMap）', () =
   it('关键热改键 request_client_info 存在且路径正确', () => {
     expect(CFG_MAP.request_client_info).toEqual(['logging', 'request_client_info'])
     expect(viewSrc).toContain("name: 'request_client_info'")
+  })
+
+  it('S1 代理两字段：CFG_MAP ↔ configSpec ↔ Go JSON tag 双向对齐，非 clearable/重启生效', () => {
+    const goSrc = fs.readFileSync(path.resolve(here, '../../internal/appserver/config.go'), 'utf8')
+    for (const name of ['proxy_enabled', 'proxy_url']) {
+      expect(CFG_MAP[name]).toEqual(['upstream', name])
+      expect(viewSrc).toContain(`name: '${name}'`)
+      expect(goSrc).toContain(`json:"${name}"`)
+      expect(CLEARABLE_CFG.has(name)).toBe(false)
+    }
+    expect(viewSrc).toContain("title: '代理转发'")
+    expect(CFG_MAP.proxy_enabled[0]).toBe('upstream')
+  })
+
+  it('代理开关关闭照发 false，空地址跳过（由 Go normalize 回落默认）', () => {
+    const out = collectConfig({
+      proxy_enabled: { type: 'checkbox', value: '', checked: false },
+      proxy_url: { type: 'text', value: '   ' },
+    }) as Record<string, Record<string, unknown>>
+    expect(out.upstream).toHaveProperty('proxy_enabled', false)
+    expect(out.upstream).not.toHaveProperty('proxy_url')
   })
 
   it('时长字段即时校验', () => {
@@ -68,7 +90,7 @@ describe('collectConfig 空串语义（TestAppJSCollectConfigClearable）', () =
       listen: mk(''), api_key: mk('secret'), user_agent: mk(''),
       prompt_file: mk(''), checkin_hours: mk(''),
     }
-    const out = collectConfig(fields) as Record<string, any>
+    const out = collectConfig(fields) as Record<string, Record<string, unknown>>
     expect(CLEARABLE_CFG.has('user_agent')).toBe(true)
     expect(CLEARABLE_CFG.has('prompt_file')).toBe(true)
     expect(out.upstream).toHaveProperty('user_agent', '')
@@ -79,12 +101,12 @@ describe('collectConfig 空串语义（TestAppJSCollectConfigClearable）', () =
   })
 
   it('trae_auto_hours 空串显式下发空数组（关闭自动签到）', () => {
-    const out = collectConfig({ trae_auto_hours: mk('') }) as Record<string, any>
+    const out = collectConfig({ trae_auto_hours: mk('') }) as Record<string, Record<string, unknown>>
     expect(out.trae.auto_hours).toEqual([])
   })
 
   it('_hours 字段按逗号/空格拆成数字数组', () => {
-    const out = collectConfig({ checkin_hours: mk('9, 21') }) as Record<string, any>
+    const out = collectConfig({ checkin_hours: mk('9, 21') }) as Record<string, Record<string, unknown>>
     expect(out.schedule.checkin_hours).toEqual([9, 21])
   })
 

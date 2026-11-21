@@ -56,7 +56,7 @@ function onTo(ev: Event): void {
   padding: 4px 9px; border: 1px solid var(--line); border-radius: var(--wb-radius);
   background: var(--surface-2); color: var(--ink-2); font: inherit; font-size: 12px; cursor: pointer;
 }
-.wb-trange-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.wb-trange-btn.active { background: var(--accent); color: var(--wb-on-accent); border-color: var(--accent); }
 .wb-trange-dt { background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; font-size: 12px; }
 .wb-trange-sep { color: var(--ink-3); }
 </style>
