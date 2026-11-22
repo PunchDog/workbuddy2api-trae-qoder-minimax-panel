@@ -225,6 +225,17 @@ func (p *Panel) workbuddyCheckin(w http.ResponseWriter, r *http.Request) {
 		UID string `json:"uid"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
+	// 平台卡「签到」按钮不带 uid：走号池全量签到，而不是落到下方的单号回落分支
+	// （uid 为空时 FindWorkBuddyAccount("") 必然查无此号，返回 ok:false）。
+	if req.UID == "" {
+		sum := p.ideWorkBuddyCheckinAll()
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":         sum.Failed == 0,
+			"checked_in": sum.OK > 0 || sum.Already > 0,
+			"summary":    sum,
+		})
+		return
+	}
 	if a := p.poolAuth(req.UID); a != nil && p.cfg.Upstream != nil {
 		err := p.cfg.Upstream.DailyCheckin(a)
 		already := err != nil && upstream.IsAlreadyCheckin(err)

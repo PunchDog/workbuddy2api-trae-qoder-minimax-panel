@@ -222,7 +222,7 @@ const healthy = computed(() => {
   return wb + qoder + ideCounts.value.trae + ideCounts.value.minimax + ideCounts.value.doubao
 })
 const errorCount = computed(() => accounts.value.filter((a) => a.disabled || a.paused).length)
-const todayCount = computed(() => accounts.value.filter((a) => (a as Record<string, unknown>).checked_today).length)
+const todayCount = computed(() => accounts.value.filter((a) => (a as Record<string, unknown>).checkin_done).length)
 const totalCredits = computed(() => wbCreditTotal(accounts.value))
 const qoderSummary = computed<QdBucketView | null>(() => (qoder.value ? qdBucketView(qoder.value) : null))
 // 七相分桶标签：只展示真实返回且计数>0 的相位，未入账相位不伪造成已领取。
@@ -236,9 +236,9 @@ const qdPhaseTags = computed(() => {
       : p === 'failed' || p === 'error' ? 'bad' : 'warn',
   }))
 })
-// 今日签到列：主池账号用上游 checked_today，缺失时显示「—」而非猜测。
+// 今日签到列：主池账号用后端 checkin_done（pool.NoteCheckinDone 落盘），缺失时显示「—」而非猜测。
 function checkedText(a: AccountStatus): string {
-  return (a as Record<string, unknown>).checked_today ? '✓' : '—'
+  return (a as Record<string, unknown>).checkin_done ? '✓' : '—'
 }
 
 /** 单个 Qoder 账号的剩余积分（套餐内 + 附加/签到）；phase!=ok 时为 null，绝不误报 0。 */
@@ -300,7 +300,7 @@ interface PlatformVm {
  */
 const platforms = computed<PlatformVm[]>(() => {
   const wbList = wbPoolAccounts.value
-  const wbChecked = wbList.length > 0 && wbList.every((a) => !!(a as Record<string, unknown>).checked_today)
+  const wbChecked = wbList.length > 0 && wbList.every((a) => !!(a as Record<string, unknown>).checkin_done)
 
   // Qoder：签到状态逐号结果（checked_in_today 为上游确认）。
   const qResults = Array.isArray(qoderStatus.value?.results) ? qoderStatus.value!.results : []

@@ -216,6 +216,13 @@ func wbDo(method, url string, headers http.Header, body []byte) (*wbResp, error)
 	if err := json.Unmarshal(raw, &r); err != nil {
 		return nil, fmt.Errorf("响应解析失败(HTTP %d): %s", resp.StatusCode, truncateStr(string(raw), 200))
 	}
+	// HTTP 错误且响应体无业务 code 字段时必须报错：端点下线后网关回
+	// {"error_msg":"404 Route Not Found"}，无 code → 上面解出 Code=0，
+	// 调用方会把「端点根本不存在」当成签到成功（2026-11-22 实测假成功）。
+	// 仍允许带 code 的业务错误照常返回（登录 pending 码、已签到等业务语义走 Code 判断）。
+	if resp.StatusCode >= http.StatusBadRequest && !bytes.Contains(raw, []byte(`"code"`)) {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
+	}
 	return &r, nil
 }
 

@@ -127,46 +127,45 @@ func (p *Panel) ideQoderCheckinAll() {
 	}
 }
 
+// workbuddyCheckinSummary WorkBuddy 全量签到计数，供平台卡按钮回显。
+type workbuddyCheckinSummary struct {
+	OK      int `json:"ok"`
+	Already int `json:"already"`
+	Failed  int `json:"failed"`
+}
+
 // ideWorkBuddyCheckinAll WorkBuddy 号池逐号签到。
 //
-// 语义与面板按钮一致：先查 status 预检（失败不阻断），再 claim；
-// 上游以「今天已签到」拒绝时同样计入「已签」。
-func (p *Panel) ideWorkBuddyCheckinAll() {
-	accounts, err := ideauth.ListWorkBuddyAccounts()
-	if err != nil {
-		log.Printf("panel: WorkBuddy 自动签到读取账号失败: %v", err)
-		return
+// 走主池 upstream.DailyCheckin（billing /v2/billing/meter/daily-checkin）——
+// 这是唯一真实可用的签到端点。旧实现走 IDE 插件 /v2/plugin/checkin/{status,claim}，
+// 2026-11-22 实测已整体 404 下线，且旧 wbDo 把无 code 的 404 当成成功，导致
+// 「日志成功 N / 积分不涨」的假成功。global/企业号无签到体系，跳过。
+// 返回计数供平台卡「签到」按钮回显；自动排程忽略返回值。
+func (p *Panel) ideWorkBuddyCheckinAll() workbuddyCheckinSummary {
+	sum := workbuddyCheckinSummary{}
+	if p.cfg.Pool == nil || p.cfg.Upstream == nil {
+		return sum
 	}
-	if len(accounts) == 0 {
-		return
-	}
-	ok, already, failed := 0, 0, 0
-	for _, a := range accounts {
-		if a.UID == "" {
+	for _, st := range p.cfg.Pool.List() {
+		a := p.cfg.Pool.AuthByUID(st.UID)
+		if a == nil || a.IsGlobal() || a.IsEnterprise() {
 			continue
 		}
-		snap, err := ideauth.FindWorkBuddyAccount(a.UID)
-		if err != nil {
-			log.Printf("panel: WorkBuddy 自动签到跳过 uid=%s：%v", a.UID, err)
-			failed++
-			continue
-		}
-		// 预检：已签则不再 claim（与面板同一语义）。预检失败仍尝试 claim。
-		_, _ = ideauth.WorkBuddyGetCheckinStatus(snap)
-		if _, cerr := ideauth.WorkBuddyClaimDailyCheckin(snap); cerr != nil {
-			if upstream.IsAlreadyCheckin(cerr) {
-				_ = ideauth.MarkCheckedIn("workbuddy", a.UID)
-				already++
+		if err := p.cfg.Upstream.DailyCheckin(a); err != nil {
+			if upstream.IsAlreadyCheckin(err) {
+				_ = ideauth.MarkCheckedIn("workbuddy", st.UID)
+				sum.Already++
 			} else {
-				log.Printf("panel: WorkBuddy 自动签到失败 uid=%s: %v", a.UID, cerr)
-				failed++
+				log.Printf("panel: WorkBuddy 自动签到失败 uid=%s: %v", st.UID, err)
+				sum.Failed++
 			}
 			continue
 		}
-		_ = ideauth.MarkCheckedIn("workbuddy", a.UID)
-		ok++
+		_ = ideauth.MarkCheckedIn("workbuddy", st.UID)
+		sum.OK++
 	}
-	log.Printf("panel: WorkBuddy 自动签到完成：成功 %d / 已签 %d / 失败 %d", ok, already, failed)
+	log.Printf("panel: WorkBuddy 自动签到完成：成功 %d / 已签 %d / 失败 %d", sum.OK, sum.Already, sum.Failed)
+	return sum
 }
 
 // ideMiniMaxCheckinAll MiniMax 号池逐号签到（token 级，无需切号）。
