@@ -145,13 +145,14 @@ describe('到期卡片不隐藏（TestPanelIndexExpiryBoxNotHidden）', () => {
 })
 
 describe('用量页对齐预览（J7 三图不恢复）', () => {
-  it('四 KPI + 三配额卡，默认按模型，覆盖说明为可见卡片', () => {
+  it('三配额卡 + 明细表，默认按模型，覆盖说明为可见卡片（顶部四 KPI 已移除）', () => {
     const usage = readSrc('views/UsageView.vue')
     expect(usage).not.toContain('wb-card-grid')
+    expect(usage).not.toContain('wb-kpi-grid')
+    expect(usage).not.toContain('KpiCard')
     expect(usage).toContain('show-hours="false"')
     expect(usage).toContain("officialDim = ref<'account' | 'model' | 'day'>('model')")
     expect(usage).toContain('missing_intervals 为补零，非真实 0')
-    expect(usage).toContain('successRate')
     expect(usage).not.toContain('TTooltip')
     expect(usage).not.toContain('用量趋势')
   })

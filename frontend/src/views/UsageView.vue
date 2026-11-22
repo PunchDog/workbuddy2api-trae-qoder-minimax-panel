@@ -7,13 +7,6 @@
       <TButton size="small" variant="outline" :loading="loading" @click="load">刷新</TButton>
     </div>
 
-    <div class="wb-kpi-grid">
-      <KpiCard label="Tokens" :value="fmtTok(totals.total_tokens)" sub="网关口径" tone="accent" />
-      <KpiCard label="成本估算" :value="fmtCredit(totals.credits)" sub="按档位单价 · 积分为观测，非货币成本" tone="warn" />
-      <KpiCard label="缓存命中" :value="hitRate" sub="cache read" tone="ok" />
-      <KpiCard label="请求数" :value="String(totals.requests)" :sub="successRate" :tone="totals.errors ? 'warn' : 'ok'" />
-    </div>
-
     <QuotaSummaryCards :opencode="opencode" :official="official" style="margin-top: 12px" :show-hours="false">
       <template #third>
         <div class="wb-card">
@@ -82,17 +75,16 @@ import { Button as TButton } from 'tdesign-vue-next'
 import { api, withQuery } from '@/api/client'
 import { statsRangeFromState, type StatsRange } from '@/api/stats'
 import type {
-  UsageResponse, KeyedAgg, Agg, OfficialUsageResponse, OpenCodeUsageResponse, TraeLimitsResponse,
+  UsageResponse, KeyedAgg, OfficialUsageResponse, OpenCodeUsageResponse, TraeLimitsResponse,
 } from '@/api/types'
 import { usePanelStore } from '@/stores/panel'
-import KpiCard from '@/components/KpiCard.vue'
 import DataTable from '@/components/DataTable.vue'
 import TimeRangeSwitch from '@/components/TimeRangeSwitch.vue'
 import QuotaSummaryCards from '@/components/QuotaSummaryCards.vue'
-import { cacheRateText, fmtCredit, fmtTok, fmtCreditRatio } from '@/utils/format'
+import { fmtCredit, fmtTok, fmtCreditRatio } from '@/utils/format'
 import { trangeQuery, defaultTrangeState, type TrangeState } from '@/utils/timeRangeLegacy'
 
-/** 用量：6 维时间切换 + KPI + 分组卡 + 明细表 + 积分扣除（PRD R-03 / T07）。 */
+/** 用量：时间切换 + 分组卡 + 明细表 + 积分扣除（PRD R-03 / T07）。 */
 const panel = usePanelStore()
 const data = ref<UsageResponse | null>(null)
 const official = ref<OfficialUsageResponse | null>(null)
@@ -103,16 +95,6 @@ const preset = ref('72')
 const from = ref('')
 const to = ref('')
 const dimension = ref<'by_account' | 'by_model' | 'by_realm'>('by_account')
-
-const EMPTY_AGG: Agg = { requests: 0, errors: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, credits: 0, credit_samples: 0, credit_tokens: 0, credits_per_1m_tokens: 0, avg_latency_ms: 0, avg_tokens_per_second: 0 }
-const totals = computed<Agg>(() => data.value?.totals || EMPTY_AGG)
-const hitRate = computed(() => cacheRateText(totals.value.cache_hit_tokens, totals.value.cache_miss_tokens))
-// 请求数 KPI 的脚注按预览口径显示成功率；无请求时不臆造百分比。
-const successRate = computed(() => {
-  const n = totals.value.requests || 0
-  if (n <= 0) return '成功 —'
-  return '成功 ' + Math.max(0, ((n - (totals.value.errors || 0)) / n) * 100).toFixed(1) + '%'
-})
 
 const detailColumns = [
   { key: 'key', title: '名称' },
