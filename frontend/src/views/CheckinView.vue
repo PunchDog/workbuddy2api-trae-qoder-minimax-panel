@@ -15,13 +15,6 @@
     <div v-if="batching" class="wb-view-note ck-batch-note">{{ BATCH_TEXT[batching] }}已开始，结果见运行日志。</div>
     <div v-if="notice" class="wb-view-note ck-batch-note" role="status">{{ notice }}</div>
 
-    <div class="wb-kpi-grid">
-      <KpiCard label="今日签到" :value="todayCount" :sub="platforms.length + ' 平台合计'" tone="ok" />
-      <KpiCard label="账号健康" :value="healthy + ' / ' + total" :sub="'健康 ' + healthy + ' / 共 ' + total" :tone="healthy === total ? 'ok' : 'warn'" />
-      <KpiCard label="额度水位" :value="fmtCredit(totalCredits)" sub="wbPoolAccounts 口径" tone="accent" />
-      <KpiCard label="待办异常" :value="String(errorCount)" :sub="errorCount ? '需人工处理' : '无异常'" :tone="errorCount ? 'bad' : 'ok'" />
-    </div>
-
     <!-- 订阅配额与用量汇总：共用 OpenCode/官方两卡，第三卡（网关汇总）由插槽提供。 -->
     <QuotaSummaryCards :opencode="opencode" :official="official">
       <template #third>
@@ -38,7 +31,7 @@
       </template>
     </QuotaSummaryCards>
 
-    <div v-if="qoderSummary || qoderStatusNote" class="wb-card qd-buckets">
+    <div v-if="qoderSummary" class="wb-card qd-buckets">
       <template v-if="qoderSummary">
         <div class="note">本次尝试 {{ qoderSummary.attempts }} 个 · {{ qoderSummary.summary }}</div>
         <div class="qd-tag-row">
@@ -48,7 +41,6 @@
         <div v-if="qoderSummary.groups" class="note" data-qd-groups="1">{{ qoderSummary.groups }}</div>
         <div v-if="qoderSummary.rotation" class="note" data-qd-rotation="1">{{ qoderSummary.rotation }}</div>
       </template>
-      <div v-if="qoderStatusNote" class="note">Qoder 签到状态：{{ qoderStatusNote }}</div>
     </div>
 
     <div class="wb-card-grid">
@@ -134,17 +126,16 @@ import type {
 import { usePanelStore } from '@/stores/panel'
 import { fetchPlatformAccounts } from '@/composables/usePlatformAccounts'
 import { ACCOUNT_JOBS } from '@/config/platformSpec'
-import KpiCard from '@/components/KpiCard.vue'
 import PlatformCard from '@/components/PlatformCard.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import QuotaSummaryCards from '@/components/QuotaSummaryCards.vue'
 import AddAccountDialog from '@/dialogs/AddAccountDialog.vue'
 import { cacheRateText, fmtCredit, fmtTok, identLabel } from '@/utils/format'
-import { isWorkBuddyRealm, wbCreditTotal } from '@/utils/credits'
+import { isWorkBuddyRealm } from '@/utils/credits'
 import { QD_PHASE_ORDER, qdBucketView, qdCounts, qdPhaseText, type QdBucketView, type QoderBatch } from '@/utils/qoder'
 
 /**
- * 签到池：KPI + 订阅配额/用量汇总 + 平台卡 + 一键/批量/逐号运维（PRD R-03/R-05，QA D3）。
+ * 签到池：订阅配额/用量汇总 + 平台卡 + 一键/批量/逐号运维（PRD R-03/R-05，QA D3）。
  *
  * 配额三卡（OpenCode / 官方用量 / 网关汇总）与号池数据并行拉取：
  * 任一上游慢或失败只降级该卡，不影响签到主流程。
@@ -209,21 +200,6 @@ const accounts = computed<AccountStatus[]>(() => overview.value?.accounts || [])
 /** 主池里的 WorkBuddy 账号（realm cn/global，排除带其它平台标识的脏 realm）。 */
 const wbPoolAccounts = computed<AccountStatus[]>(() =>
   accounts.value.filter((a) => isWorkBuddyRealm(a.realm || '')))
-/**
- * 账号健康口径：主池 WorkBuddy + 各独立号池（Qoder/Trae/MiniMax/豆包）。
- * 只数主池会让「Qoder 登录了两个号」显示 0/0——独立号池不在 overview.accounts 里。
- */
-const idePoolTotal = computed(() =>
-  qoderAccounts.value.length + ideCounts.value.trae + ideCounts.value.minimax + ideCounts.value.doubao)
-const total = computed(() => wbPoolAccounts.value.length + idePoolTotal.value)
-const healthy = computed(() => {
-  const wb = wbPoolAccounts.value.filter((a) => !a.disabled && !a.cooling && !a.paused).length
-  const qoder = qoderAccounts.value.filter((a) => !a.expired).length
-  return wb + qoder + ideCounts.value.trae + ideCounts.value.minimax + ideCounts.value.doubao
-})
-const errorCount = computed(() => accounts.value.filter((a) => a.disabled || a.paused).length)
-const todayCount = computed(() => accounts.value.filter((a) => (a as Record<string, unknown>).checkin_done).length)
-const totalCredits = computed(() => wbCreditTotal(accounts.value))
 const qoderSummary = computed<QdBucketView | null>(() => (qoder.value ? qdBucketView(qoder.value) : null))
 // 七相分桶标签：只展示真实返回且计数>0 的相位，未入账相位不伪造成已领取。
 const qdPhaseTags = computed(() => {
@@ -271,15 +247,6 @@ const qoderCreditsTotal = computed<number | null>(() => {
 })
 const gatewayHitRate = computed(() =>
   cacheRateText(gateway.value?.totals?.cache_hit_tokens, gateway.value?.totals?.cache_miss_tokens))
-const qoderStatusNote = computed(() => {
-  const d = qoderStatus.value
-  if (!d || !Array.isArray(d.results)) return ''
-  const parts = [
-    '已领 ' + (d.claimed ?? 0), '今日已领 ' + (d.already ?? 0),
-    '同人占用 ' + (d.blocked ?? 0), '待下发 ' + (d.pending ?? 0),
-  ]
-  return d.results.length + ' 个号 · ' + parts.join(' · ')
-})
 
 interface PlatformVm {
   key: string
