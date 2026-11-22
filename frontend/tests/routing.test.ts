@@ -1,7 +1,7 @@
 /*
  * routing.test.ts —— 迁移 Go 结构性守卫到 Vitest：
  * TestIndexHTMLNoInlineScript（CSP）、TestPanelIndexExpiryBoxNotHidden、
- * TestFrontendRepairContractAnchors，并锁定 8 导航项（积分构成独立）与 7 类弹窗接线。
+ * TestFrontendRepairContractAnchors，并锁定 9 导航项（积分构成独立 + 工具导入）与 7 类弹窗接线。
  * 图表相关 TestAppJSUsageChartBarClass / ChartTooltipInsideBar 属 T07，本批次不接图表。
  */
 import fs from 'node:fs'
@@ -14,10 +14,10 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const srcDir = path.resolve(here, '../src')
 const readSrc = (rel: string): string => fs.readFileSync(path.resolve(srcDir, rel), 'utf8')
 
-describe('8 导航项（默认 #checkin，积分构成独立）', () => {
-  it('导航项齐全且顺序固定：签到池→用量→积分构成→任务中心→IDE账号→模型→配置→日志', () => {
+describe('9 导航项（默认 #checkin，积分构成独立）', () => {
+  it('导航项齐全且顺序固定：签到池→用量→积分构成→任务中心→IDE账号→模型→工具导入→配置→日志', () => {
     expect(NAV_ITEMS.map((i) => i.key)).toEqual([
-      'checkin', 'usage', 'packages', 'taskscenter', 'ideaccounts', 'models', 'config', 'logs',
+      'checkin', 'usage', 'packages', 'taskscenter', 'ideaccounts', 'models', 'import', 'config', 'logs',
     ])
   })
 
@@ -31,7 +31,7 @@ describe('8 导航项（默认 #checkin，积分构成独立）', () => {
     expect(viewFromHash('#/usage?x=1')).toBe('usage')
   })
 
-  it('App.vue 接入全部 8 个独立视图，无 PlaceholderView', () => {
+  it('App.vue 接入全部 9 个独立视图，无 PlaceholderView', () => {
     const app = readSrc('App.vue')
     for (const [key, comp] of Object.entries(VIEW_COMPONENTS)) {
       expect(app, `路由 ${key} 未接入 ${comp}`).toContain(`${key}: ${comp}`)
@@ -49,6 +49,7 @@ const VIEW_COMPONENTS: Record<string, string> = {
   taskscenter: 'TasksCenterView',
   ideaccounts: 'IdeAccountsView',
   models: 'ModelsView',
+  import: 'ImportView',
   config: 'ConfigView',
   logs: 'LogsView',
 }

@@ -25,6 +25,7 @@ import (
 	"github.com/linguo2625469/workbuddy2api-panel/internal/httpauth"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/livecfg"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/minimax"
+	"github.com/linguo2625469/workbuddy2api-panel/internal/modelswitch"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/pool"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/reqlog"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/scheduler"
@@ -78,7 +79,23 @@ type Config struct {
 	// TraeDataDir Trae Work 助手的数据目录（含 data/checkin_accounts.json）。
 	// 空 = 回落 %APPDATA%\TraeWorkAssistant。
 	TraeDataDir string
+
+	// ModelSwitches 模型级启用开关台账（nil 时所有模型视为开启）。
+	// 由 appserver 装配注入，供明细页附加 enabled 字段与开关读写接口使用。
+	ModelSwitches *modelswitch.Store
+
+	// GatewayBaseURL 工具导入写入客户端的 base_url（OpenAI 兼容入口）。
+	// 空 = 回落 http://127.0.0.1:7863/v1。appserver 按 listen 注入实际地址。
+	GatewayBaseURL string
+
+	// V1ModelIDs 返回当前 /v1/models 开放清单的 id（含 trae/mm/opencode，不含关闭项）。
+	// 由 appserver 在 server handler 构造后注入；nil 时工具导入返回 503。
+	V1ModelIDs func() []string
 }
+
+// SetV1ModelIDs 注入「当前 /v1/models 开放清单 id」提供者（server handler 构造后由 appserver 调用）。
+// 工具导入以它为清单来源，避免 HTTP 自调用带来的 token/启动时序问题，且与发现端点完全同源。
+func (p *Panel) SetV1ModelIDs(fn func() []string) { p.cfg.V1ModelIDs = fn }
 
 // Panel 管理面板 handler。挂载方式：外层 mux Handle("/panel/", panel)，
 // 本 mux 的 pattern 均带 /panel 前缀（外层不做前缀剥离）。
@@ -253,6 +270,12 @@ func (p *Panel) routes() {
 	p.mux.HandleFunc("GET /panel/api/ide/trae/limits", p.withAuth(p.traeLimits))
 	p.mux.HandleFunc("GET /panel/api/config", p.withAuth(p.getConfig))
 	p.mux.HandleFunc("POST /panel/api/config", p.withAuth(p.saveConfig))
+
+	// 订阅导入：模型级开关台账 + 四工具一键导入（FR-01~06）。
+	p.mux.HandleFunc("GET /panel/api/model_switches", p.withAuth(p.modelSwitchesGet))
+	p.mux.HandleFunc("POST /panel/api/model_switches", p.withAuth(p.modelSwitchesPost))
+	p.mux.HandleFunc("GET /panel/api/import/targets", p.withAuth(p.importTargets))
+	p.mux.HandleFunc("POST /panel/api/import/run", p.withAuth(p.importRun))
 
 	// Qoder 本地 IDE 账号（读 h号池 / 添加 / 切号）
 	p.mux.HandleFunc("GET /panel/api/ide/qoder/accounts", p.withAuth(p.cachedRead(apiCacheTTLIDE, p.qoderAccounts)))
@@ -533,7 +556,21 @@ func (p *Panel) models(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "没有可用账号：请先在面板添加账号再查询")
 		return
 	}
+	// 附加模型级 enabled 字段（关闭项仍输出，供前端开关显示/重新打开）。
+	// 明细页输出全集，不按台账过滤——过滤只发生在 /v1/models（FR-01/FR-03）。
+	for _, e := range out {
+		id, _ := e["id"].(string)
+		e["enabled"] = p.modelEnabled(id)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "models": out})
+}
+
+// modelEnabled 读取某调用值 id 的启用状态；台账未注入时一律视为开启。
+func (p *Panel) modelEnabled(id string) bool {
+	if p.cfg.ModelSwitches == nil {
+		return true
+	}
+	return p.cfg.ModelSwitches.Enabled(id)
 }
 
 // panelModelEntry 构造单个模型条目（两域共用）：id 带 realm 前缀（调用值即显示值），

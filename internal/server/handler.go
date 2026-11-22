@@ -23,6 +23,7 @@ import (
 	"github.com/linguo2625469/workbuddy2api-panel/internal/logfmt"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/minimax"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/mmapi"
+	"github.com/linguo2625469/workbuddy2api-panel/internal/modelswitch"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/pool"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/prompt"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/reqlog"
@@ -94,6 +95,15 @@ type Config struct {
 	// 与号池完全无关：不参与选号/冷却；上游 Key 优先级 配置 opencode.api_key >
 	// 调用方 Authorization > env 兜底；chat/completions 计入网关用量（realm=opencode）。
 	OpenCode OpenCodeConfig
+
+	// ModelSwitches 模型级启用开关台账（可选；nil = 不过滤）。
+	// /v1/models 在动态缓存之后按 id 剔除 enabled=false，切换即时生效。
+	ModelSwitches *modelswitch.Store
+
+	// OpencodeModelIDs 返回 opencode: 前缀的模型 id（可选；nil = 不列 opencode）。
+	// 由 appserver 注入并复用 upstream 共享 helper（带缓存）；测试不注入时保持原行为，
+	// 避免测试连真实上游。id 已含 opencode: 前缀。
+	OpencodeModelIDs func() []string
 }
 
 // loadLive 返回当前运行期快照；Live 为 nil 时用静态字段合成。
@@ -507,7 +517,46 @@ func (h *Handler) modelList() []map[string]any {
 	out = append(out, h.mmModels()...)
 	// Qoder 双区模型名单（前缀 "qoder-cn:"/"qoder-intl:"），有账号才列。
 	out = append(out, h.qoderModels()...)
+	// OpenCode 模型名单（前缀 "opencode:"）：与面板明细同源，复用 upstream 共享 helper
+	// 解析（RK-01）。opencode: id 经既有 routeOpenCodeModel 即可调用，本期只补发现清单。
+	// 由 appserver 注入提供者（含短 TTL 缓存，避免每次 /v1/models 打上游）；未注入时不列。
+	if h.cfg.OpencodeModelIDs != nil {
+		for _, id := range h.cfg.OpencodeModelIDs() {
+			out = append(out, map[string]any{
+				"id":       id,
+				"object":   "model",
+				"created":  1753600000,
+				"owned_by": "opencode",
+				"name":     strings.TrimPrefix(id, openCodeModelPrefix),
+			})
+		}
+	}
+	// 统一按开关台账 id 过滤关闭项（不按前缀豁免，trae/mm 无 UI 入口但 API 写入的 false 同样生效）。
+	// 过滤发生在动态缓存之后，开关切换 <1s 即时反映。台账 nil 时原样返回。
+	if h.cfg.ModelSwitches != nil {
+		filtered := out[:0]
+		for _, e := range out {
+			id, _ := e["id"].(string)
+			if h.cfg.ModelSwitches.Enabled(id) {
+				filtered = append(filtered, e)
+			}
+		}
+		out = filtered
+	}
 	return out
+}
+
+// ModelIDs 返回当前 /v1/models 的开放模型 id 列表（已按开关台账过滤，含 trae/mm/opencode）。
+// 供面板工具导入复用同一清单来源，避免 HTTP 自调用的 token/时序问题。
+func (h *Handler) ModelIDs() []string {
+	entries := h.modelList()
+	ids := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if id, ok := e["id"].(string); ok {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 // fetchGlobalModels 返回 global 模型名单（纯动态探测结果）及被探测账号。

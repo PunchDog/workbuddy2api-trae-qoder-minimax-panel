@@ -23,6 +23,7 @@ import (
 	"github.com/linguo2625469/workbuddy2api-panel/internal/livecfg"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/minimax"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/mmapi"
+	"github.com/linguo2625469/workbuddy2api-panel/internal/modelswitch"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/panel"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/pool"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/redisstore"
@@ -346,6 +347,11 @@ func Run() {
 		RecordClientInfo:     cfg.Logging.RequestClientInfo,
 		OpenCodeAPIKey:       cfg.OpenCode.APIKey,
 	})
+	// 模型开关台账：与 state 文件同目录的 data/model_switches.json，原子写 + 内存镜像。
+	// 面板明细页附加 enabled、/v1/models 按 id 过滤关闭项，均复用同一实例。
+	switchStore := modelswitch.New(stateSibling(cfg.StateFile, "model_switches.json"))
+	log.Printf("[modelswitch] 模型开关台账已加载: %s", switchStore.Path())
+
 	// 用量记录器：与 state 文件同目录，随 state_file 配置一起搬移。
 	// datapath 由 state 文件路径推出，避免再加一个配置项。
 	usagePath := usagePathFor(cfg.StateFile)
@@ -398,6 +404,9 @@ func Run() {
 		// （同一份数据，不在两处维护两份账号）。
 		TraeEnabled: cfg.Trae.Enabled,
 		TraeDataDir: cfg.Trae.DataDir,
+		// 模型级开关台账（开关列 + /v1/models 过滤共用）。
+		ModelSwitches: switchStore,
+		GatewayBaseURL: "http://127.0.0.1" + cfg.Listen + "/v1",
 	})
 	// 成长任务队列每日自动执行（与「执行全部待办」同管线）：Sequential 族零点解锁后
 	// 无需手动扫描；hook 返回即启动（异步执行），已在跑时内部跳过。
@@ -432,7 +441,13 @@ func Run() {
 		MMAPI:   mmAPI,
 		// opencode-go 透明转发通道（独立路径 /opencode/v1/*，不接号池）。
 		OpenCode: cfg.OpenCode,
+		// 模型级开关台账：/v1/models 在缓存之后按 id 剔除关闭项。
+		ModelSwitches: switchStore,
+		// opencode 来源：与面板明细共用 upstream 解析，30s 缓存避免每次发现请求打上游。
+		OpencodeModelIDs: cachedOpencodeModelIDs(cfg.OpenCode.BaseURL, cfg.OpenCode.APIKey),
 	})
+	// 工具导入以 /v1/models 的开放清单为唯一来源，注入同一 handler 的 id 提供者。
+	pn.SetV1ModelIDs(h.ModelIDs)
 
 	// Trae 模型通道（trae: 前缀）：与签到共用 checkin_accounts.json，
 	// 走 Trae Remote 通道。开关在 trae.chat.enabled（缺省 true）。

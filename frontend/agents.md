@@ -1,6 +1,10 @@
 # agents.md — frontend（Vue3 + tdesign + Vite 前端工程）
 
-> 状态：P0–P5 + S1 已落地 + 预览对齐修正（8 独立视图 + 7 弹窗；v-html 清零；时间口径双轨裁决；KPI 单一口径；模型双列 + opencode realm；用量页四卡/三配额卡/按模型明细；J7 三图按方案B删除；日志端点失败显式化；D14 Go 任务码映射 + any 清零；S1 代理两字段配置） ｜ 最后同步：2026-11-21 ｜ 维护人：AI 执行者 ｜ 验收：待 QA 独立验收
+> 状态：P0–P5 + S1 已落地 + 预览对齐修正 + 订阅导入（9 独立视图 + 7 弹窗；模型明细启用开关列 + 工具导入页；v-html 清零；时间口径双轨裁决；KPI 单一口径；模型双列 + opencode realm；用量页四卡/三配额卡/按模型明细；J7 三图按方案B删除；日志端点失败显式化；D14 Go 任务码映射 + any 清零；S1 代理两字段配置） ｜ 最后同步：2026-11-22 ｜ 维护人：AI 执行者 ｜ 验收：待 QA 独立验收
+
+> 2026-11-22 订阅导入：新增第 9 个视图 `views/ImportView.vue`（四工具一键导入）；
+> `ModelsView.vue` 模型明细新增「启用」开关列 + 已开启 KPI，走 `model_switches` GET/POST；
+> `types.ts` 增 `ModelEntry.enabled` 与导入相关类型；`apiPaths.test.ts` 自动守卫新端点白名单。
 
 ## 1. 目录职责
 
@@ -16,7 +20,7 @@
 | `vite.config.ts` | base `/panel/`、dev 9245 + `/panel/api` proxy、`modulePreload.polyfill:false`（J7 后无 manualChunks） |
 | `tsconfig.json` | TS 严格模式、`@/` 路径别名 |
 | `index.html` | Vite 入口，只有 `#app` + 外链 module script，**禁止内联脚本** |
-| `src/main.ts` / `src/App.vue` | 应用入口 + 布局壳（侧栏 208px + 顶栏 + 8 独立路由出口，`:key=refreshTick` 重挂载刷新 + 全局弹窗挂载） |
+| `src/main.ts` / `src/App.vue` | 应用入口 + 布局壳（侧栏 208px + 顶栏 + 9 独立路由出口，`:key=refreshTick` 重挂载刷新 + 全局弹窗挂载） |
 | `src/api/client.ts` | 同源 fetch：Bearer / 401 事件 / GET 在途合并 / multipart / 15s 超时 |
 | `src/api/types.ts` / `src/api/stats.ts` | 手写 TS 契约（含 `TaskQueueItem`/`TaskQueueResponse`/`RequestMetricsResponse`，P5 D14）与三个统计端点封装（T03/T07） |
 | `src/stores/*` / `src/composables/*` | pinia 状态、主题、时间维度；`usePlatformAccounts.ts` 三视图共用账号拉取（P2 D3） |
@@ -25,7 +29,7 @@
 | `src/utils/qoder.ts` / `tasks.ts` / `requests.ts` | 契约 HTML 函数并列结构化 View 函数（`qdBucketView`/`qrowView`/`reqOutcomeView`），供 Vue 插值替代 v-html（P3 D7）；`tasks.ts` 另导出 `GO_TASK_TITLES`/`taskTitle`（P5 D14，码表逐字取自 Go `autotask.go`，未知码标注「未映射」） |
 | `src/utils/statsCharts.ts` | J7 后不再服务界面渲染；保留 option / tooltip / 数据透明纯函数供契约断言，类型别名不引 echarts 运行时 |
 | `src/utils/models.ts` | 模型筛选/排序 + `mdRawId`（J5 工具内原始 ID）+ `formatRate`（D12 Infinity 收敛） |
-| `src/views/*.vue` | 8 独立导航视图：checkin / usage / packages / taskscenter / ideaccounts / models / config / logs（CheckinPackagesView 合并容器已删，packages 为独立页） |
+| `src/views/*.vue` | 9 独立导航视图：checkin / usage / packages / taskscenter / ideaccounts / models / import / config / logs（CheckinPackagesView 合并容器已删，packages 为独立页；import 为订阅导入工具页） |
 | `src/dialogs/*.vue` | 7 类弹窗（添加账号 6 tab、积分任务、Qoder 设备/领取、券码、密钥、构建失配） |
 | `src/components/*.vue` | 通用组件：KpiCard/StatusTag/PlatformCard/DataTable/TimeRangeSwitch/ScanErrorBanner（P4 加可选 title，供日志端点失败复用）；`QuotaSummaryCards.vue` 签到页与用量页共用配额两卡 + #third 插槽（P2 D1），`showHours` prop 控制标题是否带「近 Nh」（用量页按预览传 false） |
 | `src/styles/tokens.css` / `app.css` | 令牌唯一色值源（暗色默认，含 `--wb-series-N` 序列色与 `--wb-on-accent`）；布局/卡片样式 |

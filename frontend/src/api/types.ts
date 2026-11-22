@@ -162,11 +162,49 @@ export interface ModelEntry {
   supports_reasoning?: boolean
   supported_efforts?: string[]
   tags?: string[]
+  /** 模型级启用开关；false 时该模型从 /v1/models 隐藏，但仍在明细中显示。 */
+  enabled?: boolean
   [key: string]: unknown
 }
 export interface ModelsResponse {
   ok: boolean
   models: ModelEntry[]
+}
+
+/** GET /panel/api/model_switches */
+export interface ModelSwitchesResponse {
+  ok: boolean
+  default: boolean
+  models: Record<string, boolean>
+}
+/** POST /panel/api/model_switches */
+export interface ModelSwitchesUpdate {
+  updates: Record<string, boolean>
+}
+
+/** GET /panel/api/import/targets */
+export interface ImportTarget {
+  id: string
+  label: string
+  config_path: string
+  kind: 'workbuddy' | 'qoder'
+  detected: boolean
+  description: string
+}
+export interface ImportTargetsResponse {
+  ok: boolean
+  targets: ImportTarget[]
+  base_url: string
+}
+/** POST /panel/api/import/run */
+export interface ImportRunResponse {
+  ok: boolean
+  removed_old: number
+  added: number
+  total: number
+  restart_hint: boolean
+  config_path: string
+  error?: string
 }
 
 /** GET /panel/api/packages */

@@ -80,6 +80,7 @@ import PackagesView from '@/views/PackagesView.vue'
 import TasksCenterView from '@/views/TasksCenterView.vue'
 import IdeAccountsView from '@/views/IdeAccountsView.vue'
 import ModelsView from '@/views/ModelsView.vue'
+import ImportView from '@/views/ImportView.vue'
 import ConfigView from '@/views/ConfigView.vue'
 import LogsView from '@/views/LogsView.vue'
 import ApiKeyDialog from '@/dialogs/ApiKeyDialog.vue'
@@ -100,6 +101,7 @@ const VIEW_COMPONENTS: Record<ViewKey, Component> = {
   taskscenter: TasksCenterView,
   ideaccounts: IdeAccountsView,
   models: ModelsView,
+  import: ImportView,
   config: ConfigView,
   logs: LogsView,
 }

@@ -18,8 +18,8 @@
 
     <div class="wb-kpi-grid">
       <KpiCard label="模型总数" :value="String(models.length)" :sub="'命中 ' + filtered.length" tone="accent" />
+      <KpiCard label="已开启" :value="String(enabledCount)" :sub="'共 ' + models.length + ' 个'" tone="ok" />
       <KpiCard label="默认模型" :value="String(models.filter((m) => m.is_default).length)" tone="ok" />
-      <KpiCard label="免费档" :value="String(models.filter((m) => mdRateValue(m) === 0).length)" tone="ok" />
       <KpiCard label="冷却模型" :value="String(queue?.locks?.length || 0)" sub="来自 model_queue 实时锁池" :tone="queue?.locks?.length ? 'warn' : 'ok'" />
     </div>
 
@@ -29,10 +29,13 @@
         <span class="wb-view-note"> · 第一列填入请求的 model 字段；第二列为工具内原始 ID，调用方不感知</span>
       </div>
       <table class="wb-table">
-        <thead><tr><th>模型 ID（调用值）</th><th>工具内原始 ID</th><th>名称 / 能力</th><th class="num">单价</th><th>档位</th><th>上下文</th><th>实测上限</th></tr></thead>
+        <thead><tr><th>启用</th><th>模型 ID（调用值）</th><th>工具内原始 ID</th><th>名称 / 能力</th><th class="num">单价</th><th>档位</th><th>上下文</th><th>实测上限</th></tr></thead>
         <tbody>
           <template v-for="m in filtered" :key="m.id">
             <tr class="md-row" @click="toggle(m.id)">
+              <td @click.stop>
+                <TSwitch :model-value="m.enabled !== false" size="small" :loading="switchBusy === m.id" @update:model-value="(v) => setEnabled(m, v)" />
+              </td>
               <td class="md-id">{{ m.id }}</td>
               <td class="md-id">{{ mdRawId(m) }}</td>
               <td>
@@ -48,7 +51,7 @@
               <td class="num">{{ probeText(m.id) }}</td>
             </tr>
             <tr v-if="expanded.has(m.id)" class="md-detail">
-              <td colspan="7">
+              <td colspan="8">
                 输出上限 {{ fmtTok(m.max_output_tokens) }} · 积分 {{ m.credits ?? '—' }}
                 <template v-if="m.promo_label"> · 促销 {{ m.promo_label }}（{{ m.promo_credits ?? '—' }}）</template>
                 <template v-if="m.supported_efforts?.length"> · 档位 {{ m.supported_efforts.join(', ') }}</template>
@@ -107,10 +110,11 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Input as TInput } from 'tdesign-vue-next'
+import { Input as TInput, Switch as TSwitch } from 'tdesign-vue-next'
 import { api } from '@/api/client'
 import type {
   ModelEntry, ModelsResponse, ModelQueueResponse, ModelProbesResponse, TraeLimitsResponse, TraeLimitAccount,
+  ModelSwitchesResponse,
 } from '@/api/types'
 import { usePanelStore } from '@/stores/panel'
 import KpiCard from '@/components/KpiCard.vue'
@@ -129,14 +133,34 @@ const queue = ref<ModelQueueResponse | null>(null)
 const probes = ref<ModelProbesResponse | null>(null)
 const traeLimits = ref<TraeLimitAccount[]>([])
 const expanded = ref<Set<string>>(new Set())
+const switchBusy = ref<string>('')
 const filters = reactive<ModelFilter>({ q: '', realm: '', cap: '', sort: '' })
 
 const filtered = computed(() => filterModels(models.value as never, filters))
+const enabledCount = computed(() => models.value.filter((m) => m.enabled !== false).length)
 
 function toggle(id: string): void {
   const next = new Set(expanded.value)
   if (next.has(id)) next.delete(id); else next.add(id)
   expanded.value = next
+}
+
+/** 切换模型启用：乐观更新本地值，失败回滚并提示；写入后端即时生效（<1s 反映到 /v1/models）。 */
+async function setEnabled(m: { id: string; enabled?: boolean }, enabled: boolean): Promise<void> {
+  const previous = m.enabled !== false
+  m.enabled = enabled
+  switchBusy.value = m.id
+  try {
+    await api('model_switches', {
+      method: 'POST',
+      body: JSON.stringify({ updates: { [m.id]: enabled } }),
+    })
+  } catch (e) {
+    m.enabled = previous
+    panel.setError('开关写入失败：' + (e as Error).message)
+  } finally {
+    switchBusy.value = ''
+  }
 }
 
 /** 实测标注来自脚本落盘的 model_probes.json；缺失时明确显示「未实测」，不虚构。 */
@@ -163,8 +187,19 @@ function fmtNum(v: unknown): string {
 onMounted(async () => {
   panel.beginLoad()
   try {
-    const d = await api<ModelsResponse>('models')
+    const [d, sw] = await Promise.all([
+      api<ModelsResponse>('models'),
+      api<ModelSwitchesResponse>('model_switches').catch(() => null),
+    ])
     models.value = d.models || []
+    const table = sw?.models || {}
+    for (const m of models.value) {
+      if (Object.prototype.hasOwnProperty.call(table, m.id)) {
+        m.enabled = table[m.id]
+      } else if (m.enabled == null) {
+        m.enabled = true
+      }
+    }
   } catch (e) {
     panel.setError((e as Error).message)
   } finally {

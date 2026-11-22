@@ -1,6 +1,6 @@
 /*
  * panel.ts —— 视图切换、时间维度、全局 loading/error 与刷新信号。
- * 导航 8 项独立视图（签到池 / 用量 / 积分构成 / …）；积分构成已是独立页，
+ * 导航 9 项独立视图（签到池 / 用量 / 积分构成 / … / 工具导入）；积分构成已是独立页，
  * #packages 作为合法视图键被 viewFromHash 接受，兼容老外链直达。
  */
 import { computed, ref } from 'vue'
@@ -14,6 +14,7 @@ export type ViewKey =
   | 'taskscenter'
   | 'ideaccounts'
   | 'models'
+  | 'import'
   | 'config'
   | 'logs'
 
@@ -30,6 +31,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'taskscenter', label: '任务中心', glyph: '◎' },
   { key: 'ideaccounts', label: 'IDE 账号', glyph: '◇' },
   { key: 'models', label: '模型与档位', glyph: '⌘' },
+  { key: 'import', label: '工具导入', glyph: '⇩' },
   { key: 'config', label: '配置', glyph: '⚙' },
   { key: 'logs', label: '运行日志', glyph: '≡' },
 ]
