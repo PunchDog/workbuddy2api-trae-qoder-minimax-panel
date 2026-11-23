@@ -35,7 +35,7 @@ func TestOpenCodeProxyChat(t *testing.T) {
 
 	h := newOpenCodeHandler(t, up.URL, true)
 	body := `{"model":"hy4-flash-free","conversation_id":"conv-123","messages":[]}`
-	req := httptest.NewRequest("POST", "/opencode/v1/chat/completions", strings.NewReader(body))
+	req := opencodeTestRequest("POST", "/opencode/v1/chat/completions", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer sk-upstream-key")
 	rec := httptest.NewRecorder()
@@ -74,7 +74,7 @@ func TestOpenCodeProxyIncomingSessionWins(t *testing.T) {
 
 	h := newOpenCodeHandler(t, up.URL, true)
 	body := `{"model":"x","conversation_id":"conv-body","messages":[]}`
-	req := httptest.NewRequest("POST", "/opencode/v1/chat/completions", strings.NewReader(body))
+	req := opencodeTestRequest("POST", "/opencode/v1/chat/completions", strings.NewReader(body))
 	// 客户端自带头优先于 body，且清洗首尾空白与控制字符。
 	req.Header.Set("X-Opencode-Session", "  ses-abc\r\n ")
 	rec := httptest.NewRecorder()
@@ -96,7 +96,7 @@ func TestOpenCodeProxyGeneratedSession(t *testing.T) {
 	h := newOpenCodeHandler(t, up.URL, true)
 	// 无 conversation_id / prompt_cache_key：从消息内容派生稳定键，恒非空。
 	body := `{"model":"x","messages":[{"role":"user","content":"hello"}]}`
-	req := httptest.NewRequest("POST", "/opencode/v1/chat/completions", strings.NewReader(body))
+	req := opencodeTestRequest("POST", "/opencode/v1/chat/completions", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -117,7 +117,7 @@ func TestOpenCodeProxyModelsAndQuery(t *testing.T) {
 	defer up.Close()
 
 	h := newOpenCodeHandler(t, up.URL, true)
-	req := httptest.NewRequest("GET", "/opencode/v1/models?limit=5", nil)
+	req := opencodeTestRequest("GET", "/opencode/v1/models?limit=5", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -131,7 +131,7 @@ func TestOpenCodeProxyModelsAndQuery(t *testing.T) {
 
 func TestOpenCodeProxyDisabled(t *testing.T) {
 	h := newOpenCodeHandler(t, "http://127.0.0.1:1", false)
-	req := httptest.NewRequest("POST", "/opencode/v1/chat/completions", strings.NewReader(`{}`))
+	req := opencodeTestRequest("POST", "/opencode/v1/chat/completions", strings.NewReader(`{}`))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -156,7 +156,7 @@ func TestOpenCodeProxySSEStream(t *testing.T) {
 	defer up.Close()
 
 	h := newOpenCodeHandler(t, up.URL, true)
-	req := httptest.NewRequest("POST", "/opencode/v1/chat/completions", strings.NewReader(`{"model":"x","messages":[]}`))
+	req := opencodeTestRequest("POST", "/opencode/v1/chat/completions", strings.NewReader(`{"model":"x","messages":[]}`))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -201,7 +201,7 @@ func TestOpenCodeProxyKeyPriority(t *testing.T) {
 				APIKey:   tc.gwKey,
 				OpenCode: OpenCodeConfig{Enabled: true, BaseURL: up.URL, APIKey: tc.cfgKey},
 			})
-			req := httptest.NewRequest("POST", "/opencode/v1/chat/completions", strings.NewReader(`{"model":"x","messages":[]}`))
+			req := opencodeTestRequest("POST", "/opencode/v1/chat/completions", strings.NewReader(`{"model":"x","messages":[]}`))
 			if tc.clientAuth != "" {
 				req.Header.Set("Authorization", tc.clientAuth)
 			}
@@ -231,7 +231,7 @@ func TestOpenCodeProxyKeyHotReload(t *testing.T) {
 	h := NewHandler(Config{Live: live, OpenCode: OpenCodeConfig{Enabled: true, BaseURL: up.URL}})
 	do := func() {
 		t.Helper()
-		req := httptest.NewRequest("POST", "/opencode/v1/chat/completions", strings.NewReader(`{"model":"x","messages":[]}`))
+		req := opencodeTestRequest("POST", "/opencode/v1/chat/completions", strings.NewReader(`{"model":"x","messages":[]}`))
 		req.Header.Set("Authorization", "Bearer sk-client")
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
@@ -334,7 +334,7 @@ func TestV1OpenCodeModelRoute(t *testing.T) {
 		APIKey:   "sk-gateway",
 		OpenCode: OpenCodeConfig{Enabled: true, BaseURL: up.URL, APIKey: "sk-saved-opencode"},
 	})
-	req := httptest.NewRequest("POST", "/v1/chat/completions",
+	req := opencodeTestRequest("POST", "/v1/chat/completions",
 		strings.NewReader(`{"model":"opencode:hy4-flash-free","messages":[{"role":"user","content":"hi"}]}`))
 	// 调用方带的是网关 Key；上游必须被替换成保存的 opencode Key。
 	req.Header.Set("Authorization", "Bearer sk-gateway")
@@ -358,7 +358,7 @@ func TestV1OpenCodeModelRoute(t *testing.T) {
 
 	// 负向：不带网关 Key 的请求必须在入口被 401 拦下，不能触达上游。
 	calls = 0
-	req = httptest.NewRequest("POST", "/v1/chat/completions",
+	req = opencodeTestRequest("POST", "/v1/chat/completions",
 		strings.NewReader(`{"model":"opencode:hy4-flash-free","messages":[]}`))
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, req)

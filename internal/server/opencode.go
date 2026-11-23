@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -124,6 +125,15 @@ func (h *Handler) opencodeProxy(w http.ResponseWriter, r *http.Request) {
 	if !h.cfg.OpenCode.Enabled {
 		writeOpenAIError(w, http.StatusServiceUnavailable, "opencode_disabled",
 			"opencode-go 转发通道未启用（opencode.enabled=false）")
+		return
+	}
+	// 纵深防御：本通道不套 withAuth，服务端会注入配置里的上游 Key，故只接受本机回环
+	// 调用。listen 已绑 127.0.0.1 时此处恒真；若将来误配 0.0.0.0，这道闸仍能挡住外部
+	// 借用 Key 刷上游。opencode: 前缀复用本通道的调用也来自本机，不受影响。
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err != nil || !net.ParseIP(host).IsLoopback() {
+		writeOpenAIError(w, http.StatusForbidden, "opencode_loopback_only",
+			"opencode-go 转发仅允许本机回环调用")
 		return
 	}
 	started := time.Now()

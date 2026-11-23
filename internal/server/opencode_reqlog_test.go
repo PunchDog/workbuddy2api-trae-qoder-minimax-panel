@@ -33,7 +33,7 @@ func TestOpenCodeRequestLogSync(t *testing.T) {
 	defer up.Close()
 	rl := reqlog.New(reqlog.Config{})
 	h := newOpenCodeLogHandler(up.URL, rl)
-	req := httptest.NewRequest("POST", "/opencode/v1/chat/completions",
+	req := opencodeTestRequest("POST", "/opencode/v1/chat/completions",
 		strings.NewReader(`{"model":"hy4-flash","messages":[]}`))
 	req.Header.Set("Authorization", "Bearer sk-client")
 	req.Header.Set("User-Agent", "smoke-agent")
@@ -126,7 +126,7 @@ func TestOpenCodeRequestLogModelsNotTraced(t *testing.T) {
 	defer up.Close()
 	rl := reqlog.New(reqlog.Config{})
 	h := newOpenCodeLogHandler(up.URL, rl)
-	req := httptest.NewRequest("GET", "/opencode/v1/models", nil)
+	req := opencodeTestRequest("GET", "/opencode/v1/models", nil)
 	resp := httptest.NewRecorder()
 	h.ServeHTTP(resp, req)
 	if resp.Code != http.StatusOK {

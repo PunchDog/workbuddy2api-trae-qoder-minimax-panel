@@ -23,7 +23,7 @@ func newOpenCodeUsageHandler(base string, rec *usage.Recorder) *Handler {
 
 // postOpenCodeChat 发一条 POST chat/completions 并返回响应记录器。
 func postOpenCodeChat(h *Handler, body string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest("POST", "/opencode/v1/chat/completions", strings.NewReader(body))
+	req := opencodeTestRequest("POST", "/opencode/v1/chat/completions", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -77,7 +77,7 @@ func TestOpenCodeUsageGzipSync(t *testing.T) {
 	h := newOpenCodeUsageHandler(up.URL, rec)
 	// 必须显式声明 Accept-Encoding：否则 Go 出站 Transport 自动加 gzip 并透明解压，
 	// 压缩路径根本不会到达 handler（真实客户端都会显式声明）。
-	req := httptest.NewRequest("POST", "/opencode/v1/chat/completions",
+	req := opencodeTestRequest("POST", "/opencode/v1/chat/completions",
 		strings.NewReader(`{"model":"hy4-flash","messages":[]}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept-Encoding", "gzip")
@@ -229,7 +229,7 @@ func TestOpenCodeUsageModelsNotRecorded(t *testing.T) {
 	defer up.Close()
 	rec := usage.New("")
 	h := newOpenCodeUsageHandler(up.URL, rec)
-	req := httptest.NewRequest("GET", "/opencode/v1/models", nil)
+	req := opencodeTestRequest("GET", "/opencode/v1/models", nil)
 	resp := httptest.NewRecorder()
 	h.ServeHTTP(resp, req)
 	if resp.Code != http.StatusOK {

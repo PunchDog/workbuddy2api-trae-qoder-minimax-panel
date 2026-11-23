@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -406,7 +407,7 @@ func Run() {
 		TraeDataDir: cfg.Trae.DataDir,
 		// 模型级开关台账（开关列 + /v1/models 过滤共用）。
 		ModelSwitches: switchStore,
-		GatewayBaseURL: "http://127.0.0.1" + cfg.Listen + "/v1",
+		GatewayBaseURL: gatewayBaseURLFromListen(cfg.Listen),
 	})
 	// 成长任务队列每日自动执行（与「执行全部待办」同管线）：Sequential 族零点解锁后
 	// 无需手动扫描；hook 返回即启动（异步执行），已在跑时内部跳过。
@@ -653,6 +654,9 @@ func saveConfig(raw []byte, path string, live *livecfg.Holder, p *pool.Pool, up 
 	if err := json.Unmarshal(raw, &incoming); err != nil {
 		return nil, fmt.Errorf("parse submitted config: %w", err)
 	}
+	// 面板 GET 只回显掩码，未改动的密钥字段会原样提交掩码；此处按磁盘原值还原，
+	// 避免一次保存把真实密钥抹成星号。须在 mergeConfigMaps 之前用未修改的 cur。
+	restoreMaskedSecrets(cur, incoming)
 	merged := mergeConfigMaps(cur, incoming)
 
 	// 2) 校验（与启动同一套 Default+normalize），失败直接返回、不落盘。
@@ -747,6 +751,30 @@ func restartRequiredFields(c *Config) []string {
 // mergeConfigMaps 把 incoming 深合并进 cur（原地），返回 cur。
 // 对嵌套对象逐键覆盖而不是整体替换：面板表单只提交它管理的键，
 // 未提交的兄弟键（含用户手写的未知键）保持原样。
+// restoreMaskedSecrets 把提交载荷里等于 SecretMask 的密钥字段还原为磁盘原值。
+// 面板 GET 只回显掩码，用户未改动就原样提交；不还原会把密钥覆盖成 "********"。
+func restoreMaskedSecrets(cur, incoming map[string]any) {
+	if v, ok := incoming["api_key"].(string); ok && v == panel.SecretMask {
+		if old, exists := cur["api_key"]; exists {
+			incoming["api_key"] = old
+		} else {
+			delete(incoming, "api_key")
+		}
+	}
+	ocNew, ok := incoming["opencode"].(map[string]any)
+	if !ok {
+		return
+	}
+	if v, ok := ocNew["api_key"].(string); ok && v == panel.SecretMask {
+		ocOld, _ := cur["opencode"].(map[string]any)
+		if old, exists := ocOld["api_key"]; exists {
+			ocNew["api_key"] = old
+		} else {
+			delete(ocNew, "api_key")
+		}
+	}
+}
+
 func mergeConfigMaps(cur, incoming map[string]any) map[string]any {
 	for k, v := range incoming {
 		if inMap, ok := v.(map[string]any); ok {
@@ -767,4 +795,23 @@ func mergedJSON(m map[string]any) []byte {
 		return []byte("{}")
 	}
 	return b
+}
+
+// gatewayBaseURLFromListen 由 listen 推导工具导入写入客户端的 base_url。
+// listen 允许 ":7863"、"127.0.0.1:7863"、"0.0.0.0:7863" 等写法；
+// 空/通配 host 归一到回环地址，避免拼出重复的 127.0.0.1。
+func gatewayBaseURLFromListen(listen string) string {
+	host, port, err := net.SplitHostPort(strings.TrimSpace(listen))
+	if err != nil || port == "" {
+		return "http://127.0.0.1:7863/v1"
+	}
+	switch host {
+	case "", "0.0.0.0", "::", "localhost":
+		host = "127.0.0.1"
+	default:
+		if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
+			host = "[" + host + "]"
+		}
+	}
+	return "http://" + host + ":" + port + "/v1"
 }
