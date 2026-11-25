@@ -79,6 +79,8 @@ export interface AccountStatus {
   disabled?: boolean
   paused?: boolean
   cooling?: boolean
+  /** 企业版账号：无个人签到/成长体系，签到按钮不计入「今日已签到」判定。 */
+  enterprise?: boolean
   credits?: number
   credits_total?: number
   [key: string]: unknown

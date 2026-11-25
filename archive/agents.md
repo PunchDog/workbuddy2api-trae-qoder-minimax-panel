@@ -1,6 +1,9 @@
 # agents.md — archive（冻结参考项目总索引）
 
-> 状态：初版 ｜ 最后同步：2026-11-19 ｜ 维护人：AI 执行者 ｜ 验收：待用户审阅
+> 状态：初版 ｜ 最后同步：2026-11-25 ｜ 维护人：AI 执行者 ｜ 验收：待用户审阅
+>
+> 2026-11-25：按用户拍板删除两个 Tauri 项目的 Rust 后端 `src-tauri/` 目录（263 文件，均受 git 跟踪可恢复）；
+> 保留其 TypeScript 前端 `src/`、`docs/`、`scripts/` 等设计/研究资料。本目录现无 `.rs`/`Cargo.toml`。
 
 ## 1. 目录职责
 
@@ -12,9 +15,9 @@
 
 | 子项目 | 语言/形态 | 来历与关系 |
 |---|---|---|
-| `Trae-workbuddyAssistant/` | Tauri（Rust+TS） | Trae Work Assistant fork（README 自述），桌面助手参考 |
+| `Trae-workbuddyAssistant/` | React+TS（Rust 后端已删） | Trae Work Assistant fork（README 自述），仅剩前端与 `docs/superpowers/` 设计/实施计划；Rust 后端 `src-tauri/` 已于 2026-11-25 删除 |
 | `Trae2api-cn/` | Python | Trae CN/Solo CN 模型反代（Remote/IDE/Work 通道→OpenAI 兼容），traechat 语义参照（工具调用/thinking 分离/多账号轮询） |
-| `TraeWorkAssistant/` | Tauri（Rust+TS） | AI Work 助手桌面端，wb_payload/设备指纹等行为参照 |
+| `TraeWorkAssistant/` | React+TS（Rust 后端已删） | AI Work 助手前端与设计文档；`docs/` 保留产品设计/已完成项/待办清单；Rust 后端 `src-tauri/` 已于 2026-11-25 删除 |
 | `qoder2api/` | Go | 轻量 Qoder→OpenAI/Claude/Codex 网关（Web 控制台+Bridge，无桌面 GUI），Qoder 协议参照 |
 | `qoder2api-hub/` | Python | Qoder 国内/国际版多账号网关；REALM_CONFIGS 是国内/国际差异的单一权威参照源 |
 | `workbuddy2api-panel/` | Go | 本仓库的历史版本快照（同名早期形态），演进对照 |

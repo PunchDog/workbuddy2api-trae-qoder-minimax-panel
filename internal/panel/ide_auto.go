@@ -154,6 +154,9 @@ func (p *Panel) ideWorkBuddyCheckinAll() workbuddyCheckinSummary {
 		if err := p.cfg.Upstream.DailyCheckin(a); err != nil {
 			if upstream.IsAlreadyCheckin(err) {
 				_ = ideauth.MarkCheckedIn("workbuddy", st.UID)
+				// 与逐号签到 accounts/{uid}/checkin 同口径：回写号池 checkin_done，
+				// 否则平台卡按钮签完后前端读不到变化，看起来像「按钮无效」。
+				p.cfg.Pool.NoteCheckinDone(st.UID)
 				sum.Already++
 			} else {
 				log.Printf("panel: WorkBuddy 自动签到失败 uid=%s: %v", st.UID, err)
@@ -162,6 +165,7 @@ func (p *Panel) ideWorkBuddyCheckinAll() workbuddyCheckinSummary {
 			continue
 		}
 		_ = ideauth.MarkCheckedIn("workbuddy", st.UID)
+		p.cfg.Pool.NoteCheckinDone(st.UID)
 		sum.OK++
 	}
 	log.Printf("panel: WorkBuddy 自动签到完成：成功 %d / 已签 %d / 失败 %d", sum.OK, sum.Already, sum.Failed)

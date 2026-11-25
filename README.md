@@ -1133,10 +1133,10 @@ python3 scripts/probe_max_tokens.py   --base http://127.0.0.1:7863/v1 --key sk-x
 | `archive/qoder2api-hub/` | qoder2api-hub | Qoder 本地多账号网关（Python）：账号池、模型目录、定价、i18n、任务调度、面板 |
 | `archive/Trae2api-cn/` | Trae2api-cn | Trae 国内版中转（Python），附发布记录与原生辅助组件 |
 | `archive/workbuddy2api-panel/` | workbuddy2api-panel | 面板的早期 Go 版实现（`cmd/server` / `internal/upstream` / `internal/pool` / `internal/panel`），当前实现由它演进而来 |
-| `archive/TraeWorkAssistant/` | TraeWorkAssistant | 桌面端完整实现（Tauri + Rust + React），附产品设计 / 已完成 / 待办文档全集 |
-| `archive/Trae-workbuddyAssistant/` | Trae-workbuddyAssistant | 更早的 Tauri + React 桌面端实现，附设计与实施计划 |
+| `archive/TraeWorkAssistant/` | TraeWorkAssistant | 桌面端历史实现资料（React + TypeScript 前端与设计文档）；原 Tauri + Rust 后端 `src-tauri/` 已于 2026-11-25 删除，可从 git 历史恢复 |
+| `archive/Trae-workbuddyAssistant/` | Trae-workbuddyAssistant | 更早的桌面端前端与设计/实施计划；原 Tauri + Rust 后端 `src-tauri/` 已于 2026-11-25 删除，可从 git 历史恢复 |
 
-归档内容不再维护，只作历史实现与研究资料留存；各目录保留自己的 `go.mod` / `pyproject.toml` / `Cargo.toml`，不参与主工程的构建、测试与发布（Go 自动跳过嵌套 module）。归档中不含任何真实凭据（`.env`、私钥、账号数据在归档时已剔除）。详见 [`archive/README.md`](archive/README.md)。
+归档内容不再维护，只作历史实现与研究资料留存；各目录保留自己的 `go.mod` / `pyproject.toml`（Rust 后端已移除，归档中已无 `Cargo.toml`），不参与主工程的构建、测试与发布（Go 自动跳过嵌套 module）。归档中不含任何真实凭据（`.env`、私钥、账号数据在归档时已剔除）。详见 [`archive/README.md`](archive/README.md)。
 
 ## 免责声明
 

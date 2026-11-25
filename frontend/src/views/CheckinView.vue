@@ -4,7 +4,7 @@
       <h2 class="wb-view-title">签到池</h2>
       <span class="wb-view-note">WorkBuddy · Trae · Qoder · MiniMax · 豆包 五号池统一视图</span>
       <span class="wb-titlebar-spacer" />
-      <TButton theme="primary" size="small" :loading="checking" @click="checkinAll">全部签到</TButton>
+      <TButton theme="primary" size="small" :loading="checking === 'all'" :disabled="!!checking" @click="checkinAll">全部签到</TButton>
       <TButton size="small" variant="outline" :loading="batching === 'keepalive_all'" @click="batch('keepalive_all')">保活全部</TButton>
       <TButton size="small" variant="outline" :loading="batching === 'travel_all'" @click="batch('travel_all')">旅行巡检</TButton>
       <TButton size="small" variant="outline" :loading="batching === 'activity_all'" @click="batch('activity_all')">活跃上报</TButton>
@@ -56,7 +56,7 @@
         :paused="p.paused"
       >
         <template #actions>
-          <TButton size="small" :disabled="p.checked || checking" @click="checkin(p.key)">{{ p.checked ? '已签到' : '签到' }}</TButton>
+          <TButton size="small" :loading="checking === p.key" :disabled="p.checked || !!checking" @click="checkin(p.key)">{{ p.checked ? '已签到' : '签到' }}</TButton>
         </template>
       </PlatformCard>
     </div>
@@ -154,7 +154,8 @@ const ideCounts = ref<Record<string, number>>({ trae: 0, minimax: 0, doubao: 0 }
 const opencode = ref<OpenCodeUsageResponse | null>(null)
 const official = ref<OfficialUsageResponse | null>(null)
 const gateway = ref<UsageResponse | null>(null)
-const checking = ref(false)
+/** 单平台签到在途标记：空串=空闲，否则为平台 key（驱动平台卡按钮 loading）。 */
+const checking = ref('')
 const batching = ref('')
 const busyUid = ref('')
 const addOpen = ref(false)
@@ -267,7 +268,11 @@ interface PlatformVm {
  */
 const platforms = computed<PlatformVm[]>(() => {
   const wbList = wbPoolAccounts.value
-  const wbChecked = wbList.length > 0 && wbList.every((a) => !!(a as Record<string, unknown>).checkin_done)
+  // global/enterprise 无签到体系（上游恒回「活动未开启」/checkin_done 恒为 false），
+  // 不能拖累「今日已签到」判定；只统计真正有签到能力的账号。
+  const wbCheckable = wbList.filter((a) =>
+    !((a as Record<string, unknown>).realm === 'global' || a.enterprise))
+  const wbChecked = wbCheckable.length > 0 && wbCheckable.every((a) => !!(a as Record<string, unknown>).checkin_done)
 
   // Qoder：签到状态逐号结果（checked_in_today 为上游确认）。
   const qResults = Array.isArray(qoderStatus.value?.results) ? qoderStatus.value!.results : []
@@ -379,22 +384,30 @@ async function loadQuota(): Promise<void> {
 async function checkin(key: string): Promise<void> {
   const entry = CHECKIN_JOBS.find(([k]) => k === key)
   if (!entry || checking.value) return
-  checking.value = true
+  checking.value = key
+  notice.value = ''
   try {
     const r = await api<Record<string, unknown>>(entry[1], { method: 'POST', body: '{}' })
     if (key === 'qoder') qoder.value = r as QoderBatch
+    if (key === 'workbuddy') {
+      const s = r?.summary as Record<string, unknown> | undefined
+      notice.value = s
+        ? `签到完成：成功 ${s.ok ?? 0} / 已签 ${s.already ?? 0} / 失败 ${s.failed ?? 0}`
+        : '签到完成'
+    }
     await load()
   } catch (e) {
     panel.setError((e as Error).message)
   } finally {
-    checking.value = false
+    checking.value = ''
   }
 }
 
 /** 一键签到：allSettled 保证单平台失败不影响其余平台。 */
 async function checkinAll(): Promise<void> {
   if (checking.value) return
-  checking.value = true
+  checking.value = 'all'
+  notice.value = ''
   try {
     const settled = await Promise.allSettled(
       CHECKIN_JOBS.map(([, path]) => api<Record<string, unknown>>(path, { method: 'POST', body: '{}' })),
@@ -403,11 +416,12 @@ async function checkinAll(): Promise<void> {
     if (q && q.status === 'fulfilled') qoder.value = q.value as QoderBatch
     const failed = settled.filter((s) => s.status === 'rejected').length
     if (failed) panel.setError(failed + ' 个平台签到失败，详见运行日志')
+    else notice.value = '全部平台签到已完成'
     await load()
   } catch (e) {
     panel.setError((e as Error).message)
   } finally {
-    checking.value = false
+    checking.value = ''
   }
 }
 
